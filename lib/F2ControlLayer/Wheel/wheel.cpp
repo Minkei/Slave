@@ -64,6 +64,14 @@ Wheel::Wheel(uint8_t pinDir1, uint8_t pinDir2, uint8_t pinPWM, uint16_t pwmFreq,
     // Callbacks
     _callback = nullptr;
 
+
+    // Acceleration limiting initialization
+    _maxAcceleration = 100.0f;    
+    _currentTargetRPM = 0.0f;
+    _finalTargetRPM = 0.0f;
+    _lastAccelUpdate = 0;
+    _accelerationEnabled = true;
+    _maxRPMChange = 2.0f;
 }
 
 Wheel::~Wheel() {
@@ -137,26 +145,39 @@ void Wheel::end() {
     _pidEnabled = false;
 }
 
-void Wheel::setTargetRPM(float rpm)
-{
-    _targetRPM = rpm;
+void Wheel::setTargetRPM(float rpm) {
+    _finalTargetRPM = rpm;
+    
+    if (!_accelerationEnabled) {
+        // Direct setting if acceleration limiting disabled
+        _currentTargetRPM = rpm;
+        _targetRPM = rpm;
+        _pidEnabled = true;
+        
+        if (_pid) {
+            _pid->reset();
+        }
+        
+        // Set direction
+        if (_targetRPM > 0) {
+            _direction = FORWARD;
+        } else if (_targetRPM < 0) {
+            _direction = BACKWARD;
+        } else {
+            _direction = STOP;
+        }
+        return;
+    }
+    
+    // With acceleration limiting - will be ramped in update()
     _pidEnabled = true;
-
-    // Reset PID controller
-    if (_pid) {
-        _pid->reset();
-    }
-
-    // Set wheel direction
-    if (_targetRPM > 0) {
-        _direction = FORWARD;
-    } else if (_targetRPM < 0) {
-        _direction = BACKWARD;
-    } else {
-        _direction = STOP;
-    }
-
-
+    _lastAccelUpdate = millis();
+    
+    Serial.print("Target RPM set to ");
+    Serial.print(_finalTargetRPM);
+    Serial.print(" (will ramp from ");
+    Serial.print(_currentTargetRPM);
+    Serial.println(")");
 }
 
 void Wheel::stop()
@@ -240,36 +261,59 @@ void Wheel::setDirection(bool reversed)
 }
 
 
-void Wheel::update()
-{
-    // Check if PID is enabled
+void Wheel::update() {
+    unsigned long currentTime = millis();
+    
+    // === ACCELERATION LIMITING ===
+    if (_accelerationEnabled && _pidEnabled) {
+        if (currentTime - _lastAccelUpdate >= 20) { // 20ms update rate
+            _lastAccelUpdate = currentTime;
+            
+            float rpmDifference = _finalTargetRPM - _currentTargetRPM;
+            
+            if (abs(rpmDifference) > _maxRPMChange) {
+                // Need to ramp
+                if (rpmDifference > 0) {
+                    _currentTargetRPM += _maxRPMChange;
+                } else {
+                    _currentTargetRPM -= _maxRPMChange;
+                }
+            } else {
+                // Close enough, set directly
+                _currentTargetRPM = _finalTargetRPM;
+            }
+            
+            // Update the actual target used by PID
+            _targetRPM = _currentTargetRPM;
+            
+            // Update direction based on current target
+            if (_targetRPM > 1.0f) {
+                _direction = FORWARD;
+            } else if (_targetRPM < -1.0f) {
+                _direction = BACKWARD;
+            } else {
+                _direction = STOP;
+            }
+        }
+    }
+    
+    // === EXISTING PID UPDATE ===
     if (!_pidEnabled || !_pid) return;
 
-    // Read current time
-    unsigned long currentTime = millis();
     if (currentTime - _lastUpdateTime < _pidUpdateInterval) return;
-
-    // Update last update time
     _lastUpdateTime = currentTime;
 
-    // Get current RPM
     float currentRPM = getCurrentRPM();
-
-    // Compute PID output
     float pidOutput = _pid->compute(_targetRPM, currentRPM);
 
-    // Apply output
     if (pidOutput) {
-
-        // Constrain output to valid range
         pidOutput = constrain(pidOutput, -100.0f, 100.0f);
-
-        // Apply output
+        
         if (_motor) {
             _motor->run(pidOutput);
         }
-
-        // Determine direction
+        
+        // Direction based on PID output
         if (pidOutput > 1.0f) {
             _direction = FORWARD;
         } else if (pidOutput < -1.0f) {
@@ -382,4 +426,28 @@ void Wheel::updatePID()
     if (targetReached && _callback) {
         _callback(TARGET_REACHED, currentRPM);
     }
+}
+
+void Wheel::setMaxAcceleration(float rpmPerSecond)
+{
+    if(rpmPerSecond > 0) {
+        _maxAcceleration = rpmPerSecond;
+
+        //Calculate max change per update cycle (assuming 20ms update interval)
+        _maxRPMChange = _maxAcceleration * 0.02f;
+        Serial.print("Wheel max acceleration set to ");
+        Serial.print(_maxAcceleration);
+        Serial.println(" rpm/s");
+    }
+}
+
+void Wheel::enableAccelerationLimiting(bool enable)
+{
+    _accelerationEnabled = enable;
+    if (!enable) {
+        // If disabled, set current target directly to final target
+        _currentTargetRPM = _finalTargetRPM;
+    }
+    Serial.print("Acceleration limiting ");
+    Serial.println(enable ? "ENABLED" : "DISABLED");
 }

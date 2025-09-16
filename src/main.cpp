@@ -4,10 +4,9 @@
 #include "../lib/F3ApplicationLayer/Kinematics/kinematics.h"
 #include "../lib/F3ApplicationLayer/DifferentialDrive/differentialDrive.h"
 #include "../lib/F3ApplicationLayer/Odometry/odometry.h"
-#include "../lib/F3ApplicationLayer/MotionController/motionController.h"
 #include <hardware/timer.h>
 
-// Wheel objects
+// Wheel objects (RPM controller, lowest controller level)
 Wheel wheelLeft(
   PIN_MOTOR_L_IN1, PIN_MOTOR_L_IN2, PIN_MOTOR_L_PWM, PWM_FREQ,
   PIN_MOTOR_L_ENCODER_A, PIN_MOTOR_L_ENCODER_B, REDUCER_RATIO, ENCODER_RESOLUTION, X4_MODE,
@@ -40,16 +39,14 @@ DifferentialDrive kiddoCar(&wheelLeft, &wheelRight, WHEEL_RADIUS_M, WHEEL_BASE_M
 // Odometry
 Odometry odometry(&kinematics, ENCODER_RESOLUTION, REDUCER_RATIO, X4_MODE);
 
-// Motion Controller
-MotionController motionController(&kiddoCar, &odometry, 200.0f);
 
 // Timer callback
 bool sysUpdateCallback(struct repeating_timer *t) {
   if (!dataReady) {
     wheelLeft.update();
     wheelRight.update();
-    kiddoCar.update();
-    
+    // kiddoCar.update();
+    // motionController.update();
     dataReady = true;
   }
   return true; 
@@ -74,64 +71,57 @@ void processCommand(String command) {
     } else {
       Serial.println("Format: vel <linear> <angular>");
     }
-    
   } else if (command == "stop") {
     kiddoCar.setVelocity(0, 0);
     Serial.println("Motion stopped");
     
   // === PID TUNING COMMANDS ===
-  } else if (command.startsWith("kp ")) {
-    currentKP = command.substring(3).toFloat();
-    wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
-    wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
-    Serial.print("KP set to: ");
-    Serial.println(currentKP, 4);
-    
-  } else if (command.startsWith("ki ")) {
-    currentKI = command.substring(3).toFloat();
-    wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
-    wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
-    Serial.print("KI set to: ");
-    Serial.println(currentKI, 4);
-    
-  } else if (command.startsWith("kd ")) {
-    currentKD = command.substring(3).toFloat();
-    wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
-    wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
-    Serial.print("KD set to: ");
-    Serial.println(currentKD, 4);
-    
-  } else if (command.startsWith("pid ")) {
-    // Format: "pid kp ki kd"
-    int firstSpace = command.indexOf(' ', 4);
-    int secondSpace = command.indexOf(' ', firstSpace + 1);
-    
-    if (firstSpace > 0 && secondSpace > 0) {
-      currentKP = command.substring(4, firstSpace).toFloat();
-      currentKI = command.substring(firstSpace + 1, secondSpace).toFloat();
-      currentKD = command.substring(secondSpace + 1).toFloat();
-      
-      wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
-      wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
-      
-      Serial.print("PID set - KP:");
-      Serial.print(currentKP, 4);
-      Serial.print(" KI:");
-      Serial.print(currentKI, 4);
-      Serial.print(" KD:");
-      Serial.println(currentKD, 4);
-    } else {
-      Serial.println("Format: pid <kp> <ki> <kd>");
-    }
-    
-  } else if (command == "reset") {
-    wheelLeft.resetPID();
-    wheelRight.resetPID();
-    kiddoCar.setVelocity(0, 0);
-    Serial.println("PID reset and motion stopped");
+  // } else if (command.startsWith("kp ")) {
+  //   currentKP = command.substring(3).toFloat();
+  //   wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
+  //   wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
+  //   Serial.print("KP set to: ");
+  //   Serial.println(currentKP, 4); 
+  // } else if (command.startsWith("ki ")) {
+  //   currentKI = command.substring(3).toFloat();
+  //   wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
+  //   wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
+  //   Serial.print("KI set to: ");
+  //   Serial.println(currentKI, 4);
+  // } else if (command.startsWith("kd ")) {
+  //   currentKD = command.substring(3).toFloat();
+  //   wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
+  //   wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
+  //   Serial.print("KD set to: ");
+  //   Serial.println(currentKD, 4);
+  // } else if (command.startsWith("pid ")) {
+  //   // Format: "pid kp ki kd"
+  //   int firstSpace = command.indexOf(' ', 4);
+  //   int secondSpace = command.indexOf(' ', firstSpace + 1);
+  //   if (firstSpace > 0 && secondSpace > 0) {
+  //     currentKP = command.substring(4, firstSpace).toFloat();
+  //     currentKI = command.substring(firstSpace + 1, secondSpace).toFloat();
+  //     currentKD = command.substring(secondSpace + 1).toFloat();
+  //     wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
+  //     wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
+  //     Serial.print("PID set - KP:");
+  //     Serial.print(currentKP, 4);
+  //     Serial.print(" KI:");
+  //     Serial.print(currentKI, 4);
+  //     Serial.print(" KD:");
+  //     Serial.println(currentKD, 4);
+  //   } else {
+  //     Serial.println("Format: pid <kp> <ki> <kd>");
+  //   }
+  // } else if (command == "reset") {
+  //   wheelLeft.resetPID();
+  //   wheelRight.resetPID();
+  //   kiddoCar.setVelocity(0, 0);
+  //   Serial.println("PID reset and motion stopped");
     
   // === STATUS COMMANDS ===
-  } else if (command == "status") {
+  
+} else if (command == "status") {
     Serial.println("=== SYSTEM STATUS ===");
     Serial.print("Left - Current: ");
     Serial.print(wheelLeft.getCurrentRPM(), 2);
@@ -162,8 +152,57 @@ void processCommand(String command) {
       Serial.print(", Right: ");
       Serial.println(wheelRight.getPulsePosition());
     }
+  // === ACCELERATION TUNING COMMANDS ===
+  } else if (command.startsWith("accel ")) {
+    float accel = command.substring(6).toFloat();
+    if (accel > 0 && accel <= 200) {
+      wheelLeft.setMaxAcceleration(accel);
+      wheelRight.setMaxAcceleration(accel);
+      Serial.print("Max acceleration set to ");
+      Serial.print(accel);
+      Serial.println(" RPM/s");
+    } else {
+      Serial.println("Invalid acceleration. Range: 1-200 RPM/s");
+    }
     
-  // === ODOMETRY COMMANDS ===
+  } else if (command == "accelon") {
+    wheelLeft.enableAccelerationLimiting(true);
+    wheelRight.enableAccelerationLimiting(true);
+    Serial.println("Acceleration limiting ENABLED");
+    
+  } else if (command == "acceloff") {
+    wheelLeft.enableAccelerationLimiting(false);
+    wheelRight.enableAccelerationLimiting(false);
+    Serial.println("Acceleration limiting DISABLED");
+    
+  } else if (command == "accelstatus") {
+    Serial.println("=== ACCELERATION STATUS ===");
+    Serial.print("Left wheel - Max accel: ");
+    Serial.print(wheelLeft.getMaxAcceleration());
+    Serial.print(" RPM/s, Enabled: ");
+    Serial.println(wheelLeft.isAccelerationEnabled() ? "YES" : "NO");
+    
+    Serial.print("Current target: ");
+    Serial.print(wheelLeft.getCurrentTargetRPM());
+    Serial.print(" RPM, Final target: ");
+    Serial.print(wheelLeft.getFinalTargetRPM());
+    Serial.print(" RPM, Accelerating: ");
+    Serial.println(wheelLeft.isAccelerating() ? "YES" : "NO");
+    
+    // Same for right wheel
+    Serial.print("Right wheel - Max accel: ");
+    Serial.print(wheelRight.getMaxAcceleration());
+    Serial.print(" RPM/s, Enabled: ");
+    Serial.println(wheelRight.isAccelerationEnabled() ? "YES" : "NO");
+    
+    Serial.print("Current target: ");
+    Serial.print(wheelRight.getCurrentTargetRPM());
+    Serial.print(" RPM, Final target: ");
+    Serial.print(wheelRight.getFinalTargetRPM());
+    Serial.print(" RPM, Accelerating: ");
+    Serial.println(wheelRight.isAccelerating() ? "YES" : "NO");
+      
+// === ODOMETRY COMMANDS ===
   } else if (command == "pose") {
     Pose2D pose = odometry.getPose();
     Serial.print("Position: X=");
@@ -172,11 +211,11 @@ void processCommand(String command) {
     Serial.print(pose.y, 3);
     Serial.print("m, Theta=");
     Serial.print(pose.theta * 180.0f / M_PI, 1);
-    Serial.println("°");
+    Serial.println(" deg");
       
   } else if (command == "resetpose") {
     odometry.resetPose();
-    Serial.println("Pose reset to (0,0,0°)");
+    Serial.println("Pose reset to (0,0,0 deg)");
       
   } else if (command.startsWith("setpose ")) {
     // Format: "setpose x y theta_deg"
@@ -196,7 +235,7 @@ void processCommand(String command) {
       Serial.print(y, 2);
       Serial.print(", ");
       Serial.print(theta_deg, 1);
-      Serial.println("°)");
+      Serial.println(" deg)");
     } else {
       Serial.println("Format: setpose <x> <y> <theta_degrees>");
     }
@@ -294,6 +333,12 @@ void setup() {
   wheelLeft.setDirection(false);
   wheelRight.setDirection(false);
 
+  wheelLeft.setMaxAcceleration(60.0f);
+  wheelRight.setMaxAcceleration(60.0f);
+
+  wheelLeft.enableAccelerationLimiting(true);
+  wheelRight.enableAccelerationLimiting(true);
+
   // Setup timer
   static struct repeating_timer timer;
   if (!add_repeating_timer_ms(SAMPLE_TIME_MS, sysUpdateCallback, NULL, &timer)) {
@@ -334,10 +379,8 @@ void loop() {
     long encoderLeft = wheelLeft.getPulsePosition();
     long encoderRight = wheelRight.getPulsePosition();
     odometry.update(encoderLeft, encoderRight);
-    
-    // Debug output
+    kiddoCar.update();
     odometry.printStatus(debugMode, 25);  // Every 500ms when debug enabled
-    
     dataReady = false;
   }
 }

@@ -152,6 +152,30 @@ private:
     void updateRPMCalculation();
 
 
-};
 
+
+// Add acc for wheel 
+private:
+    // Acceleration limiting
+    float _maxAcceleration;        // RPM/s
+    float _currentTargetRPM;       // Current target being ramped to
+    float _finalTargetRPM;         // Final target set by user
+    unsigned long _lastAccelUpdate;
+    bool _accelerationEnabled;
+    
+    // Power management
+    float _maxRPMChange;           // Max RPM change per update cycle
+
+public:
+    // Acceleration control
+    void setMaxAcceleration(float rpmPerSecond);
+    void enableAccelerationLimiting(bool enable = true);
+    float getMaxAcceleration() const { return _maxAcceleration; }
+    bool isAccelerationEnabled() const { return _accelerationEnabled; }
+    
+    // Status
+    float getFinalTargetRPM() const { return _finalTargetRPM; }
+    float getCurrentTargetRPM() const { return _currentTargetRPM; }
+    bool isAccelerating() const { return abs(_finalTargetRPM - _currentTargetRPM) > 0.1f; }
+};
 #endif
