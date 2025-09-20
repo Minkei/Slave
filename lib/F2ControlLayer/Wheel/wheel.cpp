@@ -66,12 +66,12 @@ Wheel::Wheel(uint8_t pinDir1, uint8_t pinDir2, uint8_t pinPWM, uint16_t pwmFreq,
 
 
     // Acceleration limiting initialization
-    _maxAcceleration = 100.0f;    
+    _maxAcceleration = 60.0f;    
     _currentTargetRPM = 0.0f;
     _finalTargetRPM = 0.0f;
     _lastAccelUpdate = 0;
     _accelerationEnabled = true;
-    _maxRPMChange = 2.0f;
+    _maxRPMChange = _maxAcceleration * (sampleTimeMs/1000.0f);
 }
 
 Wheel::~Wheel() {
@@ -266,7 +266,7 @@ void Wheel::update() {
     
     // === ACCELERATION LIMITING ===
     if (_accelerationEnabled && _pidEnabled) {
-        if (currentTime - _lastAccelUpdate >= 20) { // 20ms update rate
+        if (currentTime - _lastAccelUpdate >= _sampleTimeMs) { // 20ms update rate
             _lastAccelUpdate = currentTime;
             
             float rpmDifference = _finalTargetRPM - _currentTargetRPM;
@@ -394,18 +394,11 @@ void Wheel::printStatus(bool active, uint8_t print_interval)
     if (!active) return;
     _printCounter++;
     if (_printCounter == print_interval) {
-        Serial.print(">");
         Serial.print("SP:");
         Serial.print(_targetRPM);
         Serial.print(",");
         Serial.print("C:");
         Serial.print(_currentRPMFiltered);
-        // Serial.print(",");
-        // Serial.print("CurrentError:");
-        // Serial.print(_pid->getCurrentError());
-        // Serial.print(",");
-        // Serial.print("PIDOutput:");
-        // Serial.print(_pid->getCurrentOutput());
         Serial.println();
         _printCounter = 0;
     }
@@ -434,10 +427,12 @@ void Wheel::setMaxAcceleration(float rpmPerSecond)
         _maxAcceleration = rpmPerSecond;
 
         //Calculate max change per update cycle (assuming 20ms update interval)
-        _maxRPMChange = _maxAcceleration * 0.02f;
+        _maxRPMChange = _maxAcceleration * (_sampleTimeMs / 1000.0f);
         Serial.print("Wheel max acceleration set to ");
         Serial.print(_maxAcceleration);
-        Serial.println(" rpm/s");
+        Serial.print(" rpm/s, max change per cycle: ");
+        Serial.print(_maxRPMChange);
+        Serial.println(" rpm");
     }
 }
 

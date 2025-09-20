@@ -115,7 +115,7 @@ void Odometry::printStatus(bool active, uint8_t print_interval) const
         Serial.print("THETA:");
         Serial.print(_current_pose.theta);
         Serial.print(",");
-        Serial.print("DIST:");
+        Serial.print("DIST_FROM_ORIGIN:");
         Serial.print(getDistanceFromOrigin());
         Serial.print(",");
         Serial.print("DIST:");
