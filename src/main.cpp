@@ -4,6 +4,7 @@
 #include "../lib/F3ApplicationLayer/Kinematics/kinematics.h"
 #include "../lib/F3ApplicationLayer/DifferentialDrive/differentialDrive.h"
 #include "../lib/F3ApplicationLayer/Odometry/odometry.h"
+#include "../lib/F3ApplicationLayer/PurePersuit/purePursuit.h"
 #include <hardware/timer.h>
 
 // Wheel objects (RPM controller, lowest controller level)
@@ -39,6 +40,8 @@ DifferentialDrive kiddoCar(&wheelLeft, &wheelRight, WHEEL_RADIUS_M, WHEEL_BASE_M
 // Odometry
 Odometry odometry(&kinematics, ENCODER_RESOLUTION, REDUCER_RATIO, X4_MODE);
 
+// Pure Pursuit Controller
+PurePursuitController purePursuitController;
 
 // Timer callback
 bool sysUpdateCallback(struct repeating_timer *t) {
@@ -239,7 +242,94 @@ void processCommand(String command) {
     } else {
       Serial.println("Format: setpose <x> <y> <theta_degrees>");
     }
+  // === PURE PURSUIT COMMANDS ===
+  } else if (command.startsWith("goto ")) {
+  // Format: "goto x y [theta]"
+  int space1 = command.indexOf(' ', 5);
+  int space2 = command.indexOf(' ', space1 + 1);
+  
+  if (space1 > 0) {
+    float x = command.substring(5, space1).toFloat();
+    float y = (space2 > 0) ? command.substring(space1 + 1, space2).toFloat() : 
+                             command.substring(space1 + 1).toFloat();
+    float theta = (space2 > 0) ? command.substring(space2 + 1).toFloat() : 0.0f;
     
+    // Convert degrees to radians if needed
+    theta = theta * M_PI / 180.0f;
+    
+    purePursuitController.setTarget(x, y, theta);
+    Serial.print("Target set to: (");
+    Serial.print(x, 3);
+    Serial.print(", ");
+    Serial.print(y, 3);
+    Serial.print(", ");
+    Serial.print(theta * 180.0f / M_PI, 1);
+    Serial.println("°)");
+  } else {
+    Serial.println("Format: goto <x> <y> [theta_degrees]");
+  }
+
+  } else if (command == "ppstop") {
+  purePursuitController.reset();
+  kiddoCar.setVelocity(0, 0);
+  Serial.println("Pure Pursuit stopped");
+
+  } else if (command == "ppstatus") {
+  Serial.println("=== PURE PURSUIT STATUS ===");
+  TargetPoint target = purePursuitController.getCurrentTarget();
+  Serial.print("Target: (");
+  Serial.print(target.x, 3);
+  Serial.print(", ");
+  Serial.print(target.y, 3);
+  Serial.print(", ");
+  Serial.print(target.theta * 180.0f / M_PI, 1);
+  Serial.print("°) Valid: ");
+  Serial.println(target.valid ? "YES" : "NO");
+  
+  Serial.print("State: ");
+  switch(purePursuitController.getState()) {
+    case PP_IDLE: Serial.println("IDLE"); break;
+    case PP_FOLLOWING: Serial.println("FOLLOWING"); break;
+    case PP_GOAL_REACHED: Serial.println("GOAL REACHED"); break;
+    case PP_ERROR: Serial.println("ERROR"); break;
+  }
+  
+  Serial.print("Distance to target: ");
+  Serial.print(purePursuitController.getDistanceToTarget(), 3);
+  Serial.println(" m");
+  
+  Serial.print("Heading error: ");
+  Serial.print(purePursuitController.getHeadingError() * 180.0f / M_PI, 1);
+  Serial.println(" degrees");
+  
+  RobotVelocity ppVel = purePursuitController.getLastOutput();
+  Serial.print("PP Output: Linear=");
+  Serial.print(ppVel.linear, 3);
+  Serial.print(" m/s, Angular=");
+  Serial.print(ppVel.angular, 3);
+  Serial.println(" rad/s");
+
+  } else if (command.startsWith("ppparams ")) {
+  // Format: "ppparams max_speed min_speed lookahead"
+  int space1 = command.indexOf(' ', 9);
+  int space2 = command.indexOf(' ', space1 + 1);
+  
+  if (space1 > 0 && space2 > 0) {
+    PurePursuitParams params = purePursuitController.getParams();
+    params.max_speed = command.substring(9, space1).toFloat();
+    params.min_speed = command.substring(space1 + 1, space2).toFloat();
+    params.lookahead_dist = command.substring(space2 + 1).toFloat();
+    
+    purePursuitController.setParams(params);
+    Serial.print("PP Params - Max:");
+    Serial.print(params.max_speed, 3);
+    Serial.print(" Min:");
+    Serial.print(params.min_speed, 3);
+    Serial.print(" Lookahead:");
+    Serial.println(params.lookahead_dist, 3);
+  } else {
+    Serial.println("Format: ppparams <max_speed> <min_speed> <lookahead>");
+  }
   // === DEBUG COMMANDS ===
   } else if (command == "on") {
     debugMode = true;
@@ -284,6 +374,17 @@ void processCommand(String command) {
     Serial.println("vel 0 0.5       - Rotate 0.5 rad/s");
     Serial.println("vel 0.1 0.3     - Move + rotate");
     Serial.println("pid 2.0 0.1 0.05 - Set PID gains");
+
+    Serial.println("\n--- Pure Pursuit Control ---");
+    Serial.println("goto <x> <y> [θ°]  - Move to target position");
+    Serial.println("ppstop            - Stop Pure Pursuit");
+    Serial.println("ppstatus          - Show PP status");
+    Serial.println("ppparams <ms><mn><l> - Set max_speed, min_speed, lookahead");
+
+    Serial.println("\n--- Examples ---");
+    Serial.println("goto 0.2 0        - Move 20cm forward");
+    Serial.println("goto 0.1 0.1 90   - Move to (10cm,10cm) facing 90°");
+    Serial.println("ppparams 0.08 0.01 0.05 - Set PP parameters");
     
   } else if (command.length() > 0) {
     Serial.println("Unknown command. Type 'help' for available commands.");
@@ -380,7 +481,17 @@ void loop() {
     long encoderRight = wheelRight.getPulsePosition();
     odometry.update(encoderLeft, encoderRight);
     kiddoCar.update();
-    odometry.printStatus(debugMode, 25);  // Every 500ms when debug enabled
+    Pose2D currentPose = odometry.getPose();
+    TargetPoint currentTarget = purePursuitController.getCurrentTarget();
+    if (currentTarget.valid && purePursuitController.getState() != PP_GOAL_REACHED) {
+      RobotVelocity ppVelocity = purePursuitController.update(currentPose, currentTarget);
+      
+      // Send PP output to differential drive
+      if (purePursuitController.getState() == PP_FOLLOWING) {
+        kiddoCar.setVelocity(ppVelocity.linear, ppVelocity.angular);
+      }
+    }
+    purePursuitController.printStatus(debugMode, 25);  // Every 500ms when debug enabled
     dataReady = false;
   }
 }
