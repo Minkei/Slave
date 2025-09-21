@@ -32,7 +32,7 @@ float currentKD = KD;
 Kinematics kinematics(WHEEL_RADIUS_M, WHEEL_BASE_M);
 
 // Differential Drive
-DifferentialDrive kiddoCar(&wheelLeft, &wheelRight, WHEEL_RADIUS_M, WHEEL_BASE_M, MAX_RPM);
+DifferentialDrive differentialDrive(&wheelLeft, &wheelRight, WHEEL_RADIUS_M, WHEEL_BASE_M, MAX_RPM);
 
 // Odometry
 Odometry odometry(&kinematics, ENCODER_RESOLUTION, REDUCER_RATIO, X4_MODE);
@@ -58,7 +58,7 @@ void handleMotionCommands(String command)
       float linear = command.substring(4, spaceIndex).toFloat();
       float angular = command.substring(spaceIndex + 1).toFloat();
 
-      kiddoCar.setVelocity(linear, angular);
+      differentialDrive.setVelocity(linear, angular);
       Serial.print("Velocity set to ");
       Serial.print(linear, 3);
       Serial.print(" m/s linear, ");
@@ -72,7 +72,7 @@ void handleMotionCommands(String command)
   }
   else if (command == "stop")
   {
-    kiddoCar.setVelocity(0, 0);
+    differentialDrive.setVelocity(0, 0);
     Serial.println("All motion stopped");
   }
 }
@@ -281,7 +281,7 @@ void handleStatusCommands(String command)
     Serial.print(" KD:");
     Serial.println(currentKD, 4);
 
-    RobotVelocity currentVel = kiddoCar.getCurrentVelocity();
+    RobotVelocity currentVel = differentialDrive.getCurrentVelocity();
     Serial.print("Velocity - Linear: ");
     Serial.print(currentVel.linear, 3);
     Serial.print(" m/s, Angular: ");
@@ -468,7 +468,7 @@ void loop()
     long encoderLeft = wheelLeft.getPulsePosition();
     long encoderRight = wheelRight.getPulsePosition();
     odometry.update(encoderLeft, encoderRight);
-    kiddoCar.update();
+    differentialDrive.update();
 
     // Debug output
     if (debugMode)
