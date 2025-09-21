@@ -228,7 +228,8 @@ void handleOdometryCommands(String command)
   }
 }
 
-void showHelp() {
+void showHelp()
+{
   Serial.println("\n=== ROBOT CONTROL SYSTEM ===");
 
   Serial.println("\n--- Motion Control ---");
@@ -263,7 +264,8 @@ void showHelp() {
   Serial.println("accel 30          - Set gentle acceleration");
 }
 
-void handleStatusCommands(String command) {
+void handleStatusCommands(String command)
+{
   if (command == "status")
   {
     Serial.println("=== SYSTEM STATUS ===");
@@ -315,7 +317,7 @@ void handleStatusCommands(String command) {
     Serial.print(" m/s linear, ");
     Serial.print(vel.angular, 4);
     Serial.println(" rad/s angular");
-    
+
     // Test reverse
     RobotVelocity testVel = {0.1f, 0.0f}; // 10cm/s forward
     WheelRPM resultRPM = kinematics.inverseKinematics(testVel);
@@ -431,15 +433,24 @@ void setup()
   Serial.println();
 }
 
+char inputBuffer[128];
+int bufferIndex = 0;
+
 void loop()
 {
   // Handle serial commands
   while (Serial.available() > 0)
   {
     char inChar = (char)Serial.read();
-    inputString += inChar;
+    if (bufferIndex < sizeof(inputBuffer) - 1)
+    {
+      inputBuffer[bufferIndex++] = inChar;
+    }
     if (inChar == '\n')
     {
+      inputBuffer[bufferIndex] = '\0';
+      inputString = String(inputBuffer);
+      bufferIndex = 0;
       commandReady = true;
     }
   }
@@ -460,7 +471,8 @@ void loop()
     kiddoCar.update();
 
     // Debug output
-    if (debugMode) {
+    if (debugMode)
+    {
       wheelLeft.printStatus(true, 10);
     }
 

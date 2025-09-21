@@ -44,7 +44,6 @@ public:
     void end();
 
     // Basic control
-    void setSpeed(float speed); // speed in percentage (-100.00 to 100.00)
     void setTargetRPM(float rpm);
     void stop();
     void setRawMotorSpeed(float speed);
@@ -72,16 +71,16 @@ public:
 // Public getters
 public:
     // Public getters for speed and RPM
-    float getCurrentRPM();
+    float getCurrentRPM() const;
     float getCurrentSpeed(); // mm/s
-    float getTargetRPM();
+    float getTargetRPM() const;
 
     // Public status checks
-    bool isAtTarget();
+    bool isAtTarget() const;
     bool isRotating();
     bool isPIDEnabled();
     long getPulsePosition() const { return _encoder->getPulsePosition(); }
-    WheelDirection getDirection();
+    WheelDirection getDirection() const;
 
     // Debugging
     void printStatus(bool active, uint8_t print_interval);
@@ -110,8 +109,8 @@ private:
     float _targetRPM;
 
     // Current state
-    float _currentRPM = 0.0f;
-    float _currentRPMFiltered = 0.0f;
+    mutable float _currentRPM = 0.0f;
+    mutable float _currentRPMFiltered = 0.0f;
 
     WheelDirection _direction;
 
@@ -122,15 +121,15 @@ private:
     unsigned long _pidUpdateInterval;  // ms
 
     // RPM calculation
-    long _lastPulseCount;
-    unsigned long _lastPulseTime;
+    mutable long _lastPulseCount;
+    mutable unsigned long _lastPulseTime;
     float _totalPulsesPerRev;
     float _rpmConversionFactor;
     float _wheelCircumference;
-    unsigned long _tempCurrentTime;
-    long _tempCurrentPulses; 
-    unsigned long _tempDeltaTime;
-    long _tempDeltaPulses;
+    mutable unsigned long _tempCurrentTime;
+    mutable long _tempCurrentPulses; 
+    mutable unsigned long _tempDeltaTime;
+    mutable long _tempDeltaPulses;
 
     // Callback
     void (*_callback)(WheelEvent event, float value);

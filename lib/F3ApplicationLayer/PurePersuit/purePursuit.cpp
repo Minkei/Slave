@@ -233,10 +233,13 @@ inline float PurePursuitController::fastSin(float x) {
 }
 
 inline float PurePursuitController::fastSqrt(float x) {
+    if (x <= 0.0f) return 0.0f;  // Add bounds check
     if (x < 0.01f) return 0.0f;
     
-    // Newton-Raphson approximation (3 iterations)
+    // Newton-Raphson with better initial guess
     float guess = x * 0.5f;
+    if (x > 1.0f) guess = x * 0.25f;  // Better for large numbers
+    
     for (int i = 0; i < 3; i++) {
         guess = 0.5f * (guess + x / guess);
     }

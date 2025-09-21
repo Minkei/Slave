@@ -127,9 +127,20 @@ void Odometry::printStatus(bool active, uint8_t print_interval) const
 
 float Odometry::normalizeAngle(float angle)
 {
-    while (angle > M_PI) angle -= 2.0f * M_PI;
-    while (angle < -M_PI) angle += 2.0f * M_PI;
-    return angle;
+    // Handle extreme angles more efficiently
+    if (abs(angle) > 100.0f) {
+        // For very large angles, use fmod
+        angle = fmod(angle + M_PI, 2.0f * M_PI);
+        if (angle < 0) {
+            angle += 2.0f * M_PI;
+        }
+        return angle - M_PI;
+    } else {
+        // For normal angles, use simple method
+        while (angle > M_PI) angle -= 2.0f * M_PI;
+        while (angle < -M_PI) angle += 2.0f * M_PI;
+        return angle;
+    }
 }
 
 void Odometry::intergrateEuler(float linear_vel, float angular_vel, float dt)

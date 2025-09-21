@@ -333,12 +333,14 @@ void Wheel::setRPMFilter(Filter *newFilter)
 }
 
 
-float Wheel::getCurrentRPM()
+float Wheel::getCurrentRPM() const
 {
     if (!_encoder) return 0.0f;
-
+    
+    noInterrupts();
     _tempCurrentTime = millis();
     _tempCurrentPulses = _encoder->getPulsePosition();
+    interrupts();
 
     _tempDeltaTime = _tempCurrentTime - _lastPulseTime;
 
@@ -363,12 +365,12 @@ float Wheel::getCurrentRPM()
     return _currentRPM;
 }
 
-float Wheel::getTargetRPM()
+float Wheel::getTargetRPM() const
 {
     return _targetRPM;
 }
 
-bool Wheel::isAtTarget()
+bool Wheel::isAtTarget() const
 {
     if (!_pidEnabled) return false;
     float currentRPM = getCurrentRPM();

@@ -91,7 +91,7 @@ private:
     volatile int8_t _lastDirection;
     
     // Debouncing
-    static const uint16_t _debounceDelay = 1; // microseconds
+    static const uint16_t _debounceDelay = 50; // microseconds
     volatile unsigned long _lastInterruptTime;
 };
 

@@ -41,7 +41,7 @@ Encoder::~Encoder() {
 
 // Khởi tạo encoder
 bool Encoder::begin() {
-    if (_instanceCount >= 4) {
+    if (_instanceCount >= 2) {
         return false; // Quá nhiều instances
     }
     

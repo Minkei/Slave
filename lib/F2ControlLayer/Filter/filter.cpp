@@ -284,7 +284,16 @@ void AdaptiveFilter::selectOptimalFilter(float input)
             rateOfChange = abs(input - _lastInput) / deltaTime;
         }
     }
+    
     FilterType newFilterType;
+    if (absInput < _lowSpeedThreshold && rateOfChange < 10.0f) {
+        newFilterType = SMOOTH_FILTER;
+    } else if (absInput > _highSpeedThreshold || rateOfChange > 50.0f) {
+        newFilterType = FAST_FILTER;
+    } else {
+        newFilterType = BALANCE_FILTER;
+    }
+
     if (newFilterType != _currentFilterType) {
         delete _currentFilter;
         switch (newFilterType) {
