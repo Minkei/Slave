@@ -4,9 +4,12 @@
 #include "../lib/F3ApplicationLayer/Kinematics/kinematics.h"
 #include "../lib/F3ApplicationLayer/DifferentialDrive/differentialDrive.h"
 #include "../lib/F3ApplicationLayer/Odometry/odometry.h"
+#include "../lib/F3ApplicationLayer/PurePersuit/purePursuit.h"
+#include "../lib/F3ApplicationLayer/WaypointManager/waypointManager.h"
+#include "../lib/F3ApplicationLayer/SequenceExecutor/sequenceExecutor.h"
 #include <hardware/timer.h>
 
-// Wheel objects (RPM controller, lowest controller level)
+// === HARDWARE LAYER ===
 Wheel wheelLeft(
     PIN_MOTOR_L_IN1, PIN_MOTOR_L_IN2, PIN_MOTOR_L_PWM, PWM_FREQ,
     PIN_MOTOR_L_ENCODER_A, PIN_MOTOR_L_ENCODER_B, REDUCER_RATIO, ENCODER_RESOLUTION, X4_MODE,
@@ -17,26 +20,39 @@ Wheel wheelRight(
     PIN_MOTOR_R_ENCODER_A, PIN_MOTOR_R_ENCODER_B, REDUCER_RATIO, ENCODER_RESOLUTION, X4_MODE,
     KP, KI, KD, SAMPLE_TIME_MS);
 
-// Control variables
+// === CONTROL LAYER ===
 volatile bool dataReady = false;
 volatile bool commandReady = false;
 volatile bool debugMode = false;
 String inputString = "";
 
-// PID tuning variables
 float currentKP = KP;
 float currentKI = KI;
 float currentKD = KD;
 
-// Kinematics
+// === APPLICATION LAYER ===
 Kinematics kinematics(WHEEL_RADIUS_M, WHEEL_BASE_M);
-
-// Differential Drive
 DifferentialDrive differentialDrive(&wheelLeft, &wheelRight, WHEEL_RADIUS_M, WHEEL_BASE_M, MAX_RPM);
-
-// Odometry
 Odometry odometry(&kinematics, ENCODER_RESOLUTION, REDUCER_RATIO, X4_MODE);
 
+// === PATH FOLLOWING ===
+PurePursuitController purePursuit;
+WaypointManager waypointManager;
+SequenceExecutor sequenceExecutor;
+
+// Control modes
+enum ControlMode
+{
+  MODE_MANUAL,   // Manual velocity control
+  MODE_WAYPOINT, // Waypoint-based path following
+  MODE_SEQUENCE  // Sequence-based (MATLAB style)
+};
+
+ControlMode currentMode = MODE_MANUAL;
+bool pathFollowingActive = false;
+unsigned long lastPPPrintTime = 0;
+
+// === SYSTEM CALLBACK ===
 bool sysUpdateCallback(struct repeating_timer *t)
 {
   if (!dataReady)
@@ -48,6 +64,214 @@ bool sysUpdateCallback(struct repeating_timer *t)
   return true;
 }
 
+// === PATH FOLLOWING FUNCTIONS ===
+void startWaypointMode()
+{
+  if (waypointManager.isEmpty())
+  {
+    Serial.println("❌ No waypoints! Create path first (pathstraight, pathlshape, pathsquare)");
+    return;
+  }
+
+  currentMode = MODE_WAYPOINT;
+  pathFollowingActive = true;
+  waypointManager.reset();
+
+  // Setup Pure Pursuit
+  PurePursuitParams params = PurePursuitController::getDefaultParams();
+  params.max_speed = 0.08f;
+  params.lookahead_dist = 0.10f; // ← TĂNG từ 0.05 lên 0.10m
+  params.goal_tolerance = 0.02f;
+  params.max_angular_vel = 0.5f;        // ← GIẢM từ 1.0 xuống 0.5 rad/s
+  params.speed_reduction_factor = 0.5f; // ← GIẢM từ 1.5 xuống 0.5
+  params.enable_fast_math = false;
+  purePursuit.setParams(params);
+
+  // Set first waypoint
+  TargetPoint firstWaypoint = waypointManager.getCurrentWaypoint();
+  Pose2D startPose = odometry.getPose();
+  purePursuit.setTargetWithStartPose(firstWaypoint, startPose);
+
+  Serial.println("\n🚀 Waypoint mode started!");
+  waypointManager.printCurrentWaypoint();
+}
+
+void startSequenceMode()
+{
+  if (!sequenceExecutor.isActive())
+  {
+    Serial.println("❌ No sequence set! Use 'seq <commands>' first (e.g., seq FFLR)");
+    return;
+  }
+
+  currentMode = MODE_SEQUENCE;
+  pathFollowingActive = true;
+
+  // Setup Pure Pursuit
+  PurePursuitParams params = PurePursuitController::getDefaultParams();
+  params.max_speed = 0.06f;
+  params.lookahead_dist = 0.04f;
+  params.goal_tolerance = 0.02f;
+  params.enable_fast_math = false;
+  purePursuit.setParams(params);
+
+  Serial.println("\n🚀 Sequence mode started!");
+  sequenceExecutor.printStatus();
+}
+
+void stopPathFollowing()
+{
+  pathFollowingActive = false;
+  currentMode = MODE_MANUAL;
+  differentialDrive.stop();
+  purePursuit.reset();
+
+  Serial.println("⏹ Path following stopped");
+}
+
+void updatePathFollowing()
+{
+  if (!pathFollowingActive)
+    return;
+
+  Pose2D currentPose = odometry.getPose();
+
+  // THÊM DEBUG
+  static unsigned long lastDebug = 0;
+  if (millis() - lastDebug > 500)
+  {
+    lastDebug = millis();
+    Serial.print("DEBUG Pose: X=");
+    Serial.print(currentPose.x, 3);
+    Serial.print(" Y=");
+    Serial.print(currentPose.y, 3);
+    Serial.print(" θ=");
+    Serial.print(currentPose.theta * 180.0f / M_PI, 1);
+    Serial.print("° | Target: X=");
+    Serial.print(waypointManager.getCurrentWaypoint().x, 3);
+    Serial.print(" Y=");
+    Serial.println(waypointManager.getCurrentWaypoint().y, 3);
+  }
+
+  if (currentMode == MODE_WAYPOINT)
+  {
+    TargetPoint target = waypointManager.getCurrentWaypoint();
+
+    // THÊM LOGIC CHECK STRAIGHT PATH
+    bool isStraightPath = (abs(target.y - 0.0f) < 0.001f) &&
+                          (abs(target.theta) < 0.001f);
+
+    if (isStraightPath)
+    {
+      // Đi thẳng đơn giản - không dùng Pure Pursuit
+      float distance = sqrt((target.x - currentPose.x) * (target.x - currentPose.x) +
+                            (target.y - currentPose.y) * (target.y - currentPose.y));
+
+      if (distance < 0.02f)
+      {
+        // Đã đến target
+        differentialDrive.stop();
+        Serial.print("✓ Waypoint [");
+        Serial.print(waypointManager.getCurrentIndex());
+        Serial.println("] reached!");
+
+        if (waypointManager.moveToNextWaypoint())
+        {
+          TargetPoint nextWaypoint = waypointManager.getCurrentWaypoint();
+          purePursuit.setTarget(nextWaypoint);
+          waypointManager.printCurrentWaypoint();
+        }
+        else
+        {
+          Serial.println("\n🎉 All waypoints completed!");
+          stopPathFollowing();
+        }
+      }
+      else
+      {
+        // Đi thẳng với tốc độ cố định
+        differentialDrive.setVelocity(0.08f, 0.0f);
+      }
+    }
+    else
+    {
+      // Path phức tạp - dùng Pure Pursuit
+      RobotVelocity velocity = purePursuit.update(currentPose);
+      differentialDrive.setVelocity(velocity);
+
+      if (purePursuit.isGoalReached())
+      {
+        Serial.print("✓ Waypoint [");
+        Serial.print(waypointManager.getCurrentIndex());
+        Serial.print("] reached! Distance: ");
+        Serial.print(purePursuit.getDistanceToTarget(), 3);
+        Serial.println("m");
+
+        if (waypointManager.moveToNextWaypoint())
+        {
+          TargetPoint nextWaypoint = waypointManager.getCurrentWaypoint();
+          purePursuit.setTarget(nextWaypoint);
+          waypointManager.printCurrentWaypoint();
+        }
+        else
+        {
+          Serial.println("\n🎉 All waypoints completed!");
+          stopPathFollowing();
+        }
+      }
+    }
+
+    // Print status
+    if (millis() - lastPPPrintTime > 500)
+    {
+      if (!isStraightPath)
+      {
+        purePursuit.printStatus(true, 1);
+      }
+      lastPPPrintTime = millis();
+    }
+  }
+  else if (currentMode == MODE_SEQUENCE)
+  {
+    // Sequence mode
+    PrimitiveRef ref = sequenceExecutor.update();
+
+    if (sequenceExecutor.isComplete())
+    {
+      Serial.println("\n🎉 Sequence completed!");
+      stopPathFollowing();
+      return;
+    }
+
+    // Convert PrimitiveRef to TargetPoint
+    TargetPoint target = {ref.x, ref.y, ref.theta, true};
+
+    // Update Pure Pursuit (only set new target if needed)
+    static float lastTargetX = -999.0f;
+    static float lastTargetY = -999.0f;
+    if (abs(target.x - lastTargetX) > 0.01f || abs(target.y - lastTargetY) > 0.01f)
+    {
+      purePursuit.setTarget(target);
+      lastTargetX = target.x;
+      lastTargetY = target.y;
+    }
+
+    RobotVelocity velocity = purePursuit.update(currentPose);
+    differentialDrive.setVelocity(velocity);
+
+    // Print status
+    if (millis() - lastPPPrintTime > 500)
+    {
+      Serial.print("Seq[");
+      Serial.print(sequenceExecutor.getCurrentCommand());
+      Serial.print("] ");
+      purePursuit.printStatus(true, 1);
+      lastPPPrintTime = millis();
+    }
+  }
+}
+
+// === COMMAND HANDLERS ===
 void handleMotionCommands(String command)
 {
   if (command.startsWith("vel "))
@@ -58,12 +282,15 @@ void handleMotionCommands(String command)
       float linear = command.substring(4, spaceIndex).toFloat();
       float angular = command.substring(spaceIndex + 1).toFloat();
 
+      currentMode = MODE_MANUAL;
+      pathFollowingActive = false;
       differentialDrive.setVelocity(linear, angular);
-      Serial.print("Velocity set to ");
+
+      Serial.print("Manual mode: ");
       Serial.print(linear, 3);
-      Serial.print(" m/s linear, ");
+      Serial.print(" m/s, ");
       Serial.print(angular, 3);
-      Serial.println(" rad/s angular");
+      Serial.println(" rad/s");
     }
     else
     {
@@ -72,7 +299,8 @@ void handleMotionCommands(String command)
   }
   else if (command == "stop")
   {
-    differentialDrive.setVelocity(0, 0);
+    stopPathFollowing();
+    differentialDrive.stop();
     Serial.println("All motion stopped");
   }
 }
@@ -99,6 +327,7 @@ void handlePIDCommands(String command)
   {
     currentKD = command.substring(3).toFloat();
     wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
+    wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
     Serial.print("KD set to: ");
     Serial.println(currentKD, 4);
   }
@@ -113,11 +342,11 @@ void handlePIDCommands(String command)
       currentKD = command.substring(secondSpace + 1).toFloat();
       wheelLeft.setPIDTunings(currentKP, currentKI, currentKD);
       wheelRight.setPIDTunings(currentKP, currentKI, currentKD);
-      Serial.print("PID set - KP:");
+      Serial.print("PID: KP=");
       Serial.print(currentKP, 4);
-      Serial.print(" KI:");
+      Serial.print(" KI=");
       Serial.print(currentKI, 4);
-      Serial.print(" KD:");
+      Serial.print(" KD=");
       Serial.println(currentKD, 4);
     }
     else
@@ -133,52 +362,79 @@ void handlePIDCommands(String command)
   }
 }
 
-void handleAccelerationCommands(String command)
+void handleWaypointCommands(String command)
 {
-  if (command.startsWith("accel "))
+  if (command.startsWith("pathstraight "))
   {
-    float accel = command.substring(6).toFloat();
-    if (accel > 0 && accel <= 200)
+    float distance = command.substring(13).toFloat();
+    waypointManager.createStraightPath(distance);
+  }
+  else if (command.startsWith("pathlshape "))
+  {
+    int spaceIndex = command.indexOf(' ', 11);
+    if (spaceIndex > 0)
     {
-      wheelLeft.setMaxAcceleration(accel);
-      wheelRight.setMaxAcceleration(accel);
-      Serial.print("Max acceleration set to ");
-      Serial.print(accel);
-      Serial.println(" RPM/s");
+      float leg1 = command.substring(11, spaceIndex).toFloat();
+      float leg2 = command.substring(spaceIndex + 1).toFloat();
+      waypointManager.createLShapePath(leg1, leg2);
     }
     else
     {
-      Serial.println("Invalid acceleration. Range: 1-200 RPM/s");
+      Serial.println("Format: pathlshape <leg1> <leg2>");
     }
   }
-  else if (command == "accelon")
+  else if (command.startsWith("pathsquare "))
   {
-    wheelLeft.enableAccelerationLimiting(true);
-    wheelRight.enableAccelerationLimiting(true);
-    Serial.println("Acceleration limiting ENABLED");
+    float side = command.substring(11).toFloat();
+    waypointManager.createSquarePath(side);
   }
-  else if (command == "acceloff")
+  else if (command.startsWith("pathcircle "))
   {
-    wheelLeft.enableAccelerationLimiting(false);
-    wheelRight.enableAccelerationLimiting(false);
-    Serial.println("Acceleration limiting DISABLED");
+    int spaceIndex = command.indexOf(' ', 11);
+    float radius = command.substring(11, spaceIndex > 0 ? spaceIndex : command.length()).toFloat();
+    int segments = spaceIndex > 0 ? command.substring(spaceIndex + 1).toInt() : 8;
+    waypointManager.createCirclePath(radius, segments);
   }
-  else if (command == "accelstatus")
+  else if (command == "showpath")
   {
-    Serial.println("=== ACCELERATION STATUS ===");
-    Serial.print("Left wheel - Max accel: ");
-    Serial.print(wheelLeft.getMaxAcceleration());
-    Serial.print(" RPM/s, Enabled: ");
-    Serial.print(wheelLeft.isAccelerationEnabled() ? "YES" : "NO");
-    Serial.print(", Accelerating: ");
-    Serial.println(wheelLeft.isAccelerating() ? "YES" : "NO");
+    waypointManager.printWaypoints();
+  }
+  else if (command == "clearpath")
+  {
+    waypointManager.clear();
+    Serial.println("Path cleared");
+  }
+  else if (command == "follow")
+  {
+    startWaypointMode();
+  }
+}
 
-    Serial.print("Right wheel - Max accel: ");
-    Serial.print(wheelRight.getMaxAcceleration());
-    Serial.print(" RPM/s, Enabled: ");
-    Serial.print(wheelRight.isAccelerationEnabled() ? "YES" : "NO");
-    Serial.print(", Accelerating: ");
-    Serial.println(wheelRight.isAccelerating() ? "YES" : "NO");
+void handleSequenceCommands(String command)
+{
+  if (command.startsWith("seq "))
+  {
+    String commands = command.substring(4);
+    commands.toUpperCase();
+    sequenceExecutor.setCommandString(commands, 3.0f);
+    sequenceExecutor.start();
+    Serial.print("Sequence set: \"");
+    Serial.print(commands);
+    Serial.println("\"");
+    Serial.println("Type 'seqstart' to begin");
+  }
+  else if (command == "seqstart")
+  {
+    startSequenceMode();
+  }
+  else if (command == "seqstatus")
+  {
+    sequenceExecutor.printStatus();
+  }
+  else if (command == "seqstop")
+  {
+    sequenceExecutor.stop();
+    stopPathFollowing();
   }
 }
 
@@ -228,64 +484,42 @@ void handleOdometryCommands(String command)
   }
 }
 
-void showHelp()
-{
-  Serial.println("\n=== ROBOT CONTROL SYSTEM ===");
-
-  Serial.println("\n--- Motion Control ---");
-  Serial.println("vel <lin> <ang>   - Set linear/angular velocity");
-  Serial.println("stop              - Stop all motion");
-
-  Serial.println("\n--- PID Control ---");
-  Serial.println("kp/ki/kd <value>  - Set PID gains individually");
-  Serial.println("pid <p> <i> <d>   - Set all PID values");
-  Serial.println("pidreset          - Reset PID controllers");
-
-  Serial.println("\n--- Acceleration ---");
-  Serial.println("accel <rpm/s>     - Set max acceleration");
-  Serial.println("accelon/acceloff  - Enable/disable acceleration limiting");
-  Serial.println("accelstatus       - Show acceleration status");
-
-  Serial.println("\n--- Odometry ---");
-  Serial.println("pose              - Show current position");
-  Serial.println("resetpose         - Reset position to origin");
-  Serial.println("setpose <x> <y> <θ°> - Set position manually");
-
-  Serial.println("\n--- Status & Debug ---");
-  Serial.println("status            - Show system status");
-  Serial.println("on/off            - Debug mode toggle");
-  Serial.println("kintest           - Test kinematics");
-
-  Serial.println("\n--- Quick Examples ---");
-  Serial.println("vel 0.1 0         - Move forward 10cm/s");
-  Serial.println("vel 0 0.5         - Rotate 0.5 rad/s");
-  Serial.println("vel 0.1 0.3       - Move + rotate");
-  Serial.println("pid 2.0 0.1 0.05  - Set PID gains");
-  Serial.println("accel 30          - Set gentle acceleration");
-}
-
 void handleStatusCommands(String command)
 {
   if (command == "status")
   {
-    Serial.println("=== SYSTEM STATUS ===");
+    Serial.println("\n=== SYSTEM STATUS ===");
+    Serial.print("Mode: ");
+    switch (currentMode)
+    {
+    case MODE_MANUAL:
+      Serial.println("MANUAL");
+      break;
+    case MODE_WAYPOINT:
+      Serial.println("WAYPOINT");
+      break;
+    case MODE_SEQUENCE:
+      Serial.println("SEQUENCE");
+      break;
+    }
+
     Serial.print("Left RPM: ");
     Serial.print(wheelLeft.getCurrentRPM(), 2);
     Serial.print(", Right RPM: ");
     Serial.println(wheelRight.getCurrentRPM(), 2);
 
-    Serial.print("PID - KP:");
+    Serial.print("PID: KP=");
     Serial.print(currentKP, 4);
-    Serial.print(" KI:");
+    Serial.print(" KI=");
     Serial.print(currentKI, 4);
-    Serial.print(" KD:");
+    Serial.print(" KD=");
     Serial.println(currentKD, 4);
 
-    RobotVelocity currentVel = differentialDrive.getCurrentVelocity();
-    Serial.print("Velocity - Linear: ");
-    Serial.print(currentVel.linear, 3);
-    Serial.print(" m/s, Angular: ");
-    Serial.print(currentVel.angular, 3);
+    RobotVelocity vel = differentialDrive.getCurrentVelocity();
+    Serial.print("Velocity: ");
+    Serial.print(vel.linear, 3);
+    Serial.print(" m/s, ");
+    Serial.print(vel.angular, 3);
     Serial.println(" rad/s");
 
     Pose2D pose = odometry.getPose();
@@ -296,6 +530,13 @@ void handleStatusCommands(String command)
     Serial.print(", ");
     Serial.print(pose.theta * 180.0f / M_PI, 1);
     Serial.println("°)");
+
+    if (pathFollowingActive)
+    {
+      Serial.println("\nPath Following: ACTIVE");
+      purePursuit.printDetailedStatus();
+    }
+    Serial.println("=====================\n");
   }
   else if (command == "on")
   {
@@ -307,26 +548,54 @@ void handleStatusCommands(String command)
     debugMode = false;
     Serial.println("Debug mode disabled");
   }
-  else if (command == "kintest")
-  {
-    Serial.println("=== KINEMATICS TEST ===");
-    WheelRPM rpm = {30.0f, 30.0f};
-    RobotVelocity vel = kinematics.forwardKinematics(rpm);
-    Serial.print("30 RPM both wheels = ");
-    Serial.print(vel.linear, 4);
-    Serial.print(" m/s linear, ");
-    Serial.print(vel.angular, 4);
-    Serial.println(" rad/s angular");
+}
 
-    // Test reverse
-    RobotVelocity testVel = {0.1f, 0.0f}; // 10cm/s forward
-    WheelRPM resultRPM = kinematics.inverseKinematics(testVel);
-    Serial.print("0.1 m/s forward = Left:");
-    Serial.print(resultRPM.left, 2);
-    Serial.print(" RPM, Right:");
-    Serial.print(resultRPM.right, 2);
-    Serial.println(" RPM");
-  }
+void showHelp()
+{
+  Serial.println("\n╔════════════════════════════════════════╗");
+  Serial.println("║   KIDDOCAR CONTROL SYSTEM v2.0        ║");
+  Serial.println("╚════════════════════════════════════════╝");
+
+  Serial.println("\n--- MANUAL CONTROL ---");
+  Serial.println("vel <lin> <ang>   - Set velocity (m/s, rad/s)");
+  Serial.println("stop              - Emergency stop");
+
+  Serial.println("\n--- WAYPOINT MODE ---");
+  Serial.println("pathstraight <d>  - Create straight path");
+  Serial.println("pathlshape <l1> <l2> - Create L-shape");
+  Serial.println("pathsquare <side> - Create square path");
+  Serial.println("pathcircle <r> [n] - Create circle (n segments)");
+  Serial.println("showpath          - Show all waypoints");
+  Serial.println("clearpath         - Clear waypoints");
+  Serial.println("follow            - Start waypoint following");
+
+  Serial.println("\n--- SEQUENCE MODE (MATLAB) ---");
+  Serial.println("seq <cmds>        - Set sequence (F/L/R)");
+  Serial.println("seqstart          - Start sequence");
+  Serial.println("seqstatus         - Show sequence status");
+  Serial.println("seqstop           - Stop sequence");
+
+  Serial.println("\n--- ODOMETRY ---");
+  Serial.println("pose              - Show current position");
+  Serial.println("resetpose         - Reset to origin");
+  Serial.println("setpose <x> <y> <θ°> - Set position");
+
+  Serial.println("\n--- PID TUNING ---");
+  Serial.println("kp/ki/kd <val>    - Set PID gains");
+  Serial.println("pid <p> <i> <d>   - Set all gains");
+  Serial.println("pidreset          - Reset PID");
+
+  Serial.println("\n--- SYSTEM ---");
+  Serial.println("status            - Show full status");
+  Serial.println("on/off            - Debug mode");
+  Serial.println("help              - Show this help");
+
+  Serial.println("\n--- QUICK EXAMPLES ---");
+  Serial.println("pathsquare 0.3    - Square 30cm");
+  Serial.println("follow            - Start following");
+  Serial.println("seq FFLR          - Forward-Forward-Left-Right");
+  Serial.println("seqstart          - Start sequence");
+  Serial.println();
 }
 
 void processCommand(String command)
@@ -340,22 +609,32 @@ void processCommand(String command)
     handleMotionCommands(command);
   }
   // PID commands
-  else if (command.startsWith("kp ") || command.startsWith("ki ") || command.startsWith("kd ") || command.startsWith("pid ") || command == "pidreset")
+  else if (command.startsWith("kp ") || command.startsWith("ki ") ||
+           command.startsWith("kd ") || command.startsWith("pid ") ||
+           command == "pidreset")
   {
     handlePIDCommands(command);
   }
-  // Acceleration commands
-  else if (command.startsWith("accel") || command == "accelon" || command == "acceloff")
+  // Waypoint commands
+  else if (command.startsWith("path") || command == "showpath" ||
+           command == "clearpath" || command == "follow")
   {
-    handleAccelerationCommands(command);
+    handleWaypointCommands(command);
+  }
+  // Sequence commands
+  else if (command.startsWith("seq") || command == "seqstart" ||
+           command == "seqstatus" || command == "seqstop")
+  {
+    handleSequenceCommands(command);
   }
   // Odometry commands
-  else if (command == "pose" || command == "resetpose" || command.startsWith("setpose "))
+  else if (command == "pose" || command == "resetpose" ||
+           command.startsWith("setpose "))
   {
     handleOdometryCommands(command);
   }
-  // Status and debug commands
-  else if (command == "status" || command == "on" || command == "off" || command == "kintest")
+  // Status commands
+  else if (command == "status" || command == "on" || command == "off")
   {
     handleStatusCommands(command);
   }
@@ -364,7 +643,7 @@ void processCommand(String command)
   {
     showHelp();
   }
-  // Unknown command
+  // Unknown
   else if (command.length() > 0)
   {
     Serial.println("Unknown command. Type 'help' for available commands.");
@@ -374,63 +653,55 @@ void processCommand(String command)
 void setup()
 {
   Serial.begin(115200);
-  Serial.println("\n=== ROBOT CONTROL SYSTEM ===");
+  delay(2000);
+
+  Serial.println("\n╔════════════════════════════════════════╗");
+  Serial.println("║   KIDDOCAR CONTROL SYSTEM v2.0        ║");
+  Serial.println("║   with Pure Pursuit Integration       ║");
+  Serial.println("╚════════════════════════════════════════╝");
 
   // Initialize wheels
-  if (!wheelLeft.begin())
+  if (!wheelLeft.begin() || !wheelRight.begin())
   {
-    Serial.println("Failed to initialize left wheel.");
-    return;
+    Serial.println("❌ Failed to initialize wheels!");
+    while (1)
+      ;
   }
-  if (!wheelRight.begin())
-  {
-    Serial.println("Failed to initialize right wheel.");
-    return;
-  }
-  Serial.println("Wheels initialized successfully.");
-
-  // Initial wheel setup
-  wheelLeft.setRawMotorSpeed(0.0);
-  wheelRight.setRawMotorSpeed(0.0);
+  Serial.println("✓ Wheels initialized");
 
   // Setup filters
   wheelLeft.setRPMFilter(FilterFactory::createKalman(0.03f, 4.0f));
   wheelRight.setRPMFilter(FilterFactory::createKalman(0.03f, 4.0f));
+  Serial.println("✓ Filters configured");
 
   // Setup PID
   wheelLeft.setPIDTunings(KP, KI, KD);
   wheelRight.setPIDTunings(KP, KI, KD);
   wheelLeft.enablePID(true);
   wheelRight.enablePID(true);
-  wheelLeft.setPIDSampleTime(SAMPLE_TIME_MS);
-  wheelRight.setPIDSampleTime(SAMPLE_TIME_MS);
   wheelLeft.setPIDLimits(-100.0, 100.0);
   wheelRight.setPIDLimits(-100.0, 100.0);
+  Serial.println("✓ PID configured");
 
-  // Setup direction and acceleration
-  wheelLeft.setDirection(false);
-  wheelRight.setDirection(false);
+  // Setup acceleration
   wheelLeft.setMaxAcceleration(40.0f);
   wheelRight.setMaxAcceleration(40.0f);
   wheelLeft.enableAccelerationLimiting(true);
   wheelRight.enableAccelerationLimiting(true);
+  Serial.println("✓ Acceleration limiting enabled");
 
   // Setup timer
   static struct repeating_timer timer;
   if (!add_repeating_timer_ms(SAMPLE_TIME_MS, sysUpdateCallback, NULL, &timer))
   {
-    Serial.println("Failed to add timer");
-    return;
+    Serial.println("❌ Failed to add timer!");
+    while (1)
+      ;
   }
+  Serial.println("✓ Timer initialized");
 
-  Serial.println("System ready! Type 'help' for commands");
-  Serial.print("PID: KP=");
-  Serial.print(KP, 3);
-  Serial.print(", KI=");
-  Serial.print(KI, 3);
-  Serial.print(", KD=");
-  Serial.println(KD, 3);
-  Serial.println();
+  Serial.println("\n✓ System ready!");
+  Serial.println("Type 'help' for commands\n");
 }
 
 char inputBuffer[128];
@@ -470,10 +741,13 @@ void loop()
     odometry.update(encoderLeft, encoderRight);
     differentialDrive.update();
 
+    // Update path following
+    updatePathFollowing();
+
     // Debug output
-    if (debugMode)
+    if (debugMode && !pathFollowingActive)
     {
-      wheelLeft.printStatus(true, 10);
+      odometry.printStatus(true, 10);
     }
 
     dataReady = false;

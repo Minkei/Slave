@@ -40,9 +40,9 @@
 #define ENCODER_RESOLUTION 7
 #define REDUCER_RATIO 150
 
-#define KP 30.0
+#define KP 10.0
 #define KI 0.0
-#define KD 0.0
+#define KD 0.1
 #define SAMPLE_TIME_MS 20
 
 // Robot physical parameters (ADDED)

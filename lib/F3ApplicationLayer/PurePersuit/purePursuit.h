@@ -1,3 +1,4 @@
+// purePursuit.h
 #ifndef PURE_PURSUIT_H
 #define PURE_PURSUIT_H
 
@@ -37,7 +38,7 @@ struct PurePursuitParams
     bool enable_collision_check; // place holder for collision check
 
     // Performance parameters
-    float enable_fast_math; // use fast approximation functions
+    bool enable_fast_math; // ✅ FIXED: changed from float to bool
 };
 
 // Controller state
@@ -97,8 +98,8 @@ public:
     // Constructor
     PurePursuitController(const PurePursuitParams& params = getDefaultParams());
     
-    // Main control function
-    RobotVelocity update(const Pose2D& current_pose, const TargetPoint& target);
+    // ✅ FIXED: Main control function - NO LONGER takes target parameter
+    RobotVelocity update(const Pose2D& current_pose);
 
     // Configuration
     void setParams(const PurePursuitParams& params);
