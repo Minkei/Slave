@@ -207,7 +207,8 @@ RobotVelocity PurePursuitController::computePurePursuitVelocity(
 
         // Linear velocity - slower for sharp turns
         float alpha_abs = abs(alpha);
-        float speed_factor = 1.0f - _params.speed_reduction_factor * alpha_abs * 0.31831f; // 1/π
+        const float INV_PI = 0.31831f; // 1/π
+        float speed_factor = 1.0f - _params.speed_reduction_factor * alpha_abs * INV_PI;
         speed_factor = max(speed_factor, _params.min_speed / _params.max_speed);
         float linear_vel = _params.max_speed * speed_factor;
 
@@ -297,7 +298,8 @@ inline float PurePursuitController::fastSin(float x)
 
     if (abs(x) < 0.5f)
     {
-        return x - (x * x * x) / 6.0f;
+        float x2 = x * x;
+        return x - (x2 * x) / 6.0f;
     }
     return sin(x);
 }

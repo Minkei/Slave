@@ -5,7 +5,7 @@
 
 Wheel::Wheel(uint8_t pinDir1, uint8_t pinDir2, uint8_t pinPWM, uint16_t pwmFreq, 
              uint8_t pinA, uint8_t pinB, uint16_t reducer_ratio, uint16_t encoder_resolution, 
-             EncoderMode mode, float kp, float ki, float kd, float sampleTimeMs)
+             EncoderMode mode, float kp, float ki, float kd, float sampleTimeMs) : _printCounter(0)
 {
     // Initialize hardware configuration
     // Motor
@@ -337,8 +337,8 @@ float Wheel::getCurrentRPM() const
 {
     if (!_encoder) return 0.0f;
     
-    noInterrupts();
     _tempCurrentTime = millis();
+    noInterrupts();
     _tempCurrentPulses = _encoder->getPulsePosition();
     interrupts();
 
@@ -391,7 +391,7 @@ bool Wheel::isPIDEnabled()
     return _pidEnabled;
 }
 
-void Wheel::printStatus(bool active, uint8_t print_interval)
+void Wheel::printStatus(bool active, uint8_t print_interval) const
 {
     if (!active) return;
     _printCounter++;

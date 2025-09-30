@@ -239,7 +239,7 @@ void Encoder::_handleInterrupt() {
     }
     
     // Cập nhật timing và direction
-    if (direction != 0) {
+    if (abs(direction) > 0) {
         _timeBetweenPulses = currentTime - _lastChangeTime;
         _lastChangeTime = currentTime;
         _lastDirection = direction;

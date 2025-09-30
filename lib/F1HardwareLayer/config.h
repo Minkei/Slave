@@ -8,8 +8,8 @@
 // #define DEBOUNCE_MS 500
 
 // Bluetooth BLE
-#define IAM "peripheral"
-#define IAM_SENDING_TO "central"
+#define BLE_IAM "peripheral"
+#define BLE_IAM_SENDING_TO "central"
 #define BLE_NAME "peripheral"
 #define BLE_SVC_UUID 1000
 #define BLE_CHAR_P2C_UUID 0x2B6E

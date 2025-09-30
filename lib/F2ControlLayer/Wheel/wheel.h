@@ -83,7 +83,7 @@ public:
     WheelDirection getDirection() const;
 
     // Debugging
-    void printStatus(bool active, uint8_t print_interval);
+    void printStatus(bool active, uint8_t print_interval) const;
     String getStatusString();
 
 // Private variables
@@ -126,6 +126,14 @@ private:
     float _totalPulsesPerRev;
     float _rpmConversionFactor;
     float _wheelCircumference;
+    
+    struct RPMCalcCache {
+        unsigned long currentTime;
+        long currentPulses;
+        unsigned long deltaTime;
+        long deltaPulses;
+    } mutable _rpmCalcCache;
+
     mutable unsigned long _tempCurrentTime;
     mutable long _tempCurrentPulses; 
     mutable unsigned long _tempDeltaTime;
@@ -135,7 +143,7 @@ private:
     void (*_callback)(WheelEvent event, float value);
 
     // Debugging
-    uint8_t _printCounter;
+    mutable uint8_t _printCounter;
 
 // Private methods
 private:
