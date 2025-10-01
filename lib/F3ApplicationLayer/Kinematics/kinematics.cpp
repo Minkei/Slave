@@ -51,17 +51,18 @@ float Kinematics::getMaxAngularVelocity(float max_rpm) const
     return (2.0f * max_wheel_velocity) / _wheel_base;
 }
 
-WheelRPM Kinematics::constrainRPM(const WheelRPM &wheel_rpm, float max_rpm) const
+WheelRPM Kinematics::constrainRPM(const WheelRPM &wheel_rpm, float min_rpm, float max_rpm) const
 {
     WheelRPM constrained = wheel_rpm;
 
-    float max_requested = std::max(std::abs(wheel_rpm.left), std::abs(wheel_rpm.right));
+    // Clamp max
+    constrained.left  = std::clamp(wheel_rpm.left,  -max_rpm, max_rpm);
+    constrained.right = std::clamp(wheel_rpm.right, -max_rpm, max_rpm);
 
-    if (max_requested > max_rpm) {
-        float scale = max_rpm / max_requested;
-        constrained.left *= scale;
-        constrained.right *= scale;
-    }
+    // Deadzone: nếu nhỏ hơn min thì coi như 0
+    if (std::abs(constrained.left) < min_rpm) constrained.left = 0.0f;
+    if (std::abs(constrained.right) < min_rpm) constrained.right = 0.0f;
 
     return constrained;
 }
+

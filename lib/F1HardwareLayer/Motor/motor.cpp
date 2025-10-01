@@ -49,3 +49,11 @@ void Motor::stop() {
     digitalWrite(_pinDir2, LOW);
     analogWrite(_pinPWM, 0);
 }
+
+void Motor::quickStop()
+{
+    // Immediately cut power to motor
+    digitalWrite(_pinDir1, LOW);
+    digitalWrite(_pinDir2, LOW);
+    analogWrite(_pinPWM, 0);
+}

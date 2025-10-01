@@ -13,13 +13,14 @@ private:
     RobotVelocity _target_velocity;
     RobotVelocity _current_velocity;
 
-    float _max_rpm;
+    float _max_rpm_percent;
+    float _min_rpm_percent;
     mutable uint8_t _printCounter;
 
 public:
     DifferentialDrive(Wheel * wheel_left, Wheel * wheel_right, 
         float wheel_radius = 0.017f, float wheel_base = 0.075f, 
-        float max_rpm = 60.0f);
+        float min_rpm_percent = 20.0f, float max_rpm_percent = 60.0f);
 
     void setVelocity(float linear, float angular);
     void setVelocity(const RobotVelocity &velocity);
@@ -40,8 +41,10 @@ public:
     WheelRPM getCurrentWheelRPM() const;
     WheelRPM getTargetWheelRPM() const;
 
-    void setMaxRPM(float max_rpm) { _max_rpm = max_rpm; }
-    float getMaxRPM() const { return _max_rpm; }
+    void setMaxRPM(float max_rpm_percent) { _max_rpm_percent = max_rpm_percent; }
+    void setMinRPM(float min_rpm_percent) { _min_rpm_percent = min_rpm_percent; }
+    float getMaxRPM() const { return _max_rpm_percent; }
+    float getMinRPM() const { return _min_rpm_percent; }
 
     void printStatus(bool active, uint8_t print_interval) const;
 

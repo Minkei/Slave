@@ -22,6 +22,8 @@ public:
     
     // Dừng motor
     void stop();
+
+    void quickStop();
 };
 
 #endif
