@@ -21,38 +21,15 @@ void DifferentialDrive::setVelocity(const RobotVelocity &velocity)
     WheelRPM target_rpm = _kinematics.inverseKinematics(velocity);
     target_rpm = _kinematics.constrainRPM(target_rpm, _min_rpm_percent, _max_rpm_percent);
 
+    if (!_wheel_left->isPIDEnabled() || !_wheel_right->isPIDEnabled())
+    {
+        _wheel_left->enablePID(true);
+        _wheel_right->enablePID(true);
+        Serial.println("✓ PID enabled in DifferentialDrive");
+    }
+
     _wheel_left->setTargetRPM(target_rpm.left);
     _wheel_right->setTargetRPM(target_rpm.right);
-}
-
-void DifferentialDrive::moveLinear(float speed)
-{
-    setVelocity(speed, 0.0f);
-}
-
-void DifferentialDrive::moveForward(float speed)
-{
-    setVelocity(speed, 0.0f);
-}
-
-void DifferentialDrive::moveBackward(float speed)
-{
-    setVelocity(-speed, 0.0f);
-}
-
-void DifferentialDrive::rotate(float angular_speed)
-{
-    setVelocity(0.0f, angular_speed);
-}
-
-void DifferentialDrive::turnLeft(float angular_speed)
-{
-    setVelocity(0.0f, angular_speed); // positive value, ccw
-}
-
-void DifferentialDrive::turnRight(float angular_speed)
-{
-    setVelocity(0.0f, -angular_speed); // negative value, cw
 }
 
 void DifferentialDrive::stop()

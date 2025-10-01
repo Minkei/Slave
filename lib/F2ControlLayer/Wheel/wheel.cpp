@@ -167,26 +167,19 @@ void Wheel::setTargetRPM(float rpm)
         _targetRPM = rpm;
         _pidEnabled = true;
 
-        // ✅ GAIN SCHEDULING: Adjust PID based on target RPM
+        // Gain scheduling code...
         float absRPM = abs(rpm);
-
         if (absRPM < 10.0f)
         {
-            // LOW RPM (< 10): Gentle control, add integral
             setPIDTunings(2.0f, 0.3f, 0.02f);
-            Serial.println("PID: Low RPM mode (Kp=2.0, Ki=0.3, Kd=0.02)");
         }
         else if (absRPM < 30.0f)
         {
-            // MEDIUM RPM (10-30): Moderate control
             setPIDTunings(5.0f, 0.1f, 0.05f);
-            Serial.println("PID: Medium RPM mode (Kp=5.0, Ki=0.1, Kd=0.05)");
         }
         else
         {
-            // HIGH RPM (> 30): Aggressive control
             setPIDTunings(10.0f, 0.0f, 0.1f);
-            Serial.println("PID: High RPM mode (Kp=10.0, Ki=0.0, Kd=0.1)");
         }
 
         if (_pid)
@@ -194,7 +187,6 @@ void Wheel::setTargetRPM(float rpm)
             _pid->reset();
         }
 
-        // Set direction
         if (_targetRPM > 0)
         {
             _direction = FORWARD;
@@ -210,7 +202,24 @@ void Wheel::setTargetRPM(float rpm)
         return;
     }
 
-    // With acceleration limiting
+    // ✅ BẮT ĐẦU TỪ RPM THỰC TẾ thay vì giá trị cũ
+    float actualRPM = getCurrentRPM();
+
+    // Nếu bánh xe đã dừng hẳn (< 2 RPM), reset về 0
+    if (abs(actualRPM) < 2.0f)
+    {
+        _currentTargetRPM = 0.0f;
+        Serial.println("Wheel stopped - starting from 0 RPM");
+    }
+    else
+    {
+        // Bánh xe vẫn đang quay, bắt đầu từ RPM hiện tại
+        _currentTargetRPM = actualRPM;
+        Serial.print("Wheel moving - starting from ");
+        Serial.print(actualRPM);
+        Serial.println(" RPM");
+    }
+
     _pidEnabled = true;
     _lastAccelUpdate = millis();
 
@@ -238,8 +247,10 @@ void Wheel::stop()
     // Disable PID
     _pidEnabled = false;
 
-    // Clear targets
+    // Clear ALL targets (including acceleration state)
     _targetRPM = 0.0f;
+    _currentTargetRPM = 0.0f; // ✅ Reset acceleration state
+    _finalTargetRPM = 0.0f;   // ✅ Reset acceleration state
 
     // Update state
     _direction = STOP;

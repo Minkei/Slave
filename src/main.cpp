@@ -467,7 +467,8 @@ void handleStatusCommands(String command)
       Serial.println("SEQUENCE (Fuzzy)");
       break;
     }
-
+    Serial.print("PID Enabled: ");
+    Serial.println(wheelLeft.isPIDEnabled() && wheelRight.isPIDEnabled() ? "YES" : "NO");
     Serial.print("Left RPM: ");
     Serial.print(wheelLeft.getCurrentRPM(), 2);
     Serial.print(", Right RPM: ");

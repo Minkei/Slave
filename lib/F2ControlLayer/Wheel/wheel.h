@@ -59,24 +59,19 @@ public:
     void resetPID();
 
     // Wheel configuration
-    void setWheelDiameter(float diameter);
     void setDirection(bool reversed);
 
     // Update and Callback
     void update();
-    void setCallback(void (*callback)(WheelEvent event, float value));
 
     // Filter
     void setRPMFilter(Filter *newFilter);
-    void enableAdaptiveFilter(bool enable = true);
-    void setAdaptiveFilterParams(float lowSpeedThreshold, float highSpeedThreshold);
 
     // Helper
     void updateGainScheduling();
 public:
     // Public getters for speed and RPM
     float getCurrentRPM() const;
-    float getCurrentSpeed(); // mm/s
     float getTargetRPM() const;
 
     // Public status checks
@@ -84,11 +79,9 @@ public:
     bool isRotating();
     bool isPIDEnabled();
     long getPulsePosition() const { return _encoder->getPulsePosition(); }
-    WheelDirection getDirection() const;
 
     // Debugging
     void printStatus(bool active, uint8_t print_interval) const;
-    String getStatusString();
 
     // Private variables
 private:
@@ -146,16 +139,8 @@ private:
 
     // Private methods
 private:
-    // Calculations
-    float pulseToMM(long pulses); // Keep for getCurrentSpeed()
-    long mmToPulse(float mm);     // Keep for wheel diameter calculations
-
-    // Validation
-    float constrainSpeed(float speed);
-
     // Internal control
     void updatePID();
-    void updateRPMCalculation();
 
     // Add acc for wheel
 private:

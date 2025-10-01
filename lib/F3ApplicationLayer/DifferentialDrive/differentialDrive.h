@@ -25,13 +25,6 @@ public:
     void setVelocity(float linear, float angular);
     void setVelocity(const RobotVelocity &velocity);
 
-    void moveLinear(float speed); // positive for forward, negative for backward
-    void moveForward(float speed); // positive value, move forward
-    void moveBackward(float speed); // positive value, move backward
-    void rotate(float angular_speed);
-    void turnLeft(float angular_speed);
-    void turnRight(float angular_speed);
-
     void stop();
     void update();
     
