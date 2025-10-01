@@ -48,6 +48,7 @@ public:
     // Basic control
     void setTargetRPM(float rpm);
     void stop();
+    void quickStop();
     void setRawMotorSpeed(float speed);
 
     // PID Configuration
@@ -70,7 +71,8 @@ public:
     void enableAdaptiveFilter(bool enable = true);
     void setAdaptiveFilterParams(float lowSpeedThreshold, float highSpeedThreshold);
 
-    // Public getters
+    // Helper
+    void updateGainScheduling();
 public:
     // Public getters for speed and RPM
     float getCurrentRPM() const;

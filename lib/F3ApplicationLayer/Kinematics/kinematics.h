@@ -33,7 +33,7 @@ public:
     float getMaxLinearVelocity(float max_rpm) const;
     float getMaxAngularVelocity(float max_rpm) const;
 
-    WheelRPM constrainRPM(const WheelRPM& wheel_rpm, float max_rpm) const;
+    WheelRPM constrainRPM(const WheelRPM& wheel_rpm, float min_rpm, float max_rpm) const;
 };
 
 #endif

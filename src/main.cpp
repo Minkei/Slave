@@ -4,15 +4,13 @@
 #include "../lib/F3ApplicationLayer/Kinematics/kinematics.h"
 #include "../lib/F3ApplicationLayer/DifferentialDrive/differentialDrive.h"
 #include "../lib/F3ApplicationLayer/Odometry/odometry.h"
-#include "../lib/F3ApplicationLayer/PurePersuit/purePursuit.h"
-#include "../lib/F3ApplicationLayer/WaypointManager/waypointManager.h"
 #include "../lib/F3ApplicationLayer/SequenceExecutor/sequenceExecutor.h"
+// #include "../lib/F3ApplicationLayer/FuzzyController/fuzzyController.h"  // TODO: Implement
 #include <hardware/timer.h>
 
 // === FORWARD DECLARATIONS ===
 void handleMotionCommands(String command);
 void handlePIDCommands(String command);
-void handleWaypointCommands(String command);
 void handleSequenceCommands(String command);
 void handleOdometryCommands(String command);
 void handleStatusCommands(String command);
@@ -34,17 +32,18 @@ typedef void (*CommandHandler)(String);
 
 struct CommandEntry
 {
-  const char *prefix;     // Command prefix or exact name
-  CommandHandler handler; // Handler function
-  bool exactMatch;        // true = exact match, false = startsWith
-  const char *helpText;   // Short description for auto-help
+  const char *prefix;
+  CommandHandler handler;
+  bool exactMatch;
+  const char *helpText;
 };
 
-// ✅ COMPLETE COMMAND TABLE
 const CommandEntry COMMAND_TABLE[] = {
     // Motion commands
     {"vel ", handleMotionCommands, false, "Set velocity <lin> <ang> (m/s, rad/s)"},
     {"stop", handleMotionCommands, true, "Emergency stop all motion"},
+    {"quickstop", handleMotionCommands, true, "Quick stop all motion"},
+    {"rawmotor ", handleMotionCommands, false, "Set raw motor speed <left> <right> (-100 to 100)"},
 
     // PID commands
     {"kp ", handlePIDCommands, false, "Set proportional gain"},
@@ -52,16 +51,6 @@ const CommandEntry COMMAND_TABLE[] = {
     {"kd ", handlePIDCommands, false, "Set derivative gain"},
     {"pid ", handlePIDCommands, false, "Set all PID gains <kp> <ki> <kd>"},
     {"pidreset", handlePIDCommands, true, "Reset PID controllers"},
-
-    // Waypoint commands
-    {"addwp ", handleWaypointCommands, false, "Add waypoint <x> <y> [theta_deg]"},
-    {"pathstraight ", handleWaypointCommands, false, "Create straight path <distance>"},
-    {"pathlshape ", handleWaypointCommands, false, "Create L-shape <leg1> <leg2>"},
-    {"pathsquare ", handleWaypointCommands, false, "Create square path <side>"},
-    {"pathcircle ", handleWaypointCommands, false, "Create circle <radius> [segments]"},
-    {"showpath", handleWaypointCommands, true, "Display all waypoints"},
-    {"clearpath", handleWaypointCommands, true, "Clear all waypoints"},
-    {"follow", handleWaypointCommands, true, "Start waypoint following"},
 
     // Sequence commands
     {"seq ", handleSequenceCommands, false, "Set command sequence (F/L/R)"},
@@ -82,7 +71,6 @@ const CommandEntry COMMAND_TABLE[] = {
     // Help command
     {"help", handleHelpCommand, true, "Show this help message"},
 
-    // Sentinel (end of table)
     {nullptr, nullptr, false, nullptr}};
 
 // === GLOBAL STATE ===
@@ -94,28 +82,27 @@ String inputString = "";
 float currentKP = KP;
 float currentKI = KI;
 float currentKD = KD;
-Pose2D currentPose = {0.0f, 0.0f, 0.0f};
 
 // === APPLICATION LAYER ===
 Kinematics kinematics(WHEEL_RADIUS_M, WHEEL_BASE_M);
-DifferentialDrive differentialDrive(&wheelLeft, &wheelRight, WHEEL_RADIUS_M, WHEEL_BASE_M, MAX_RPM);
+DifferentialDrive differentialDrive(&wheelLeft, &wheelRight, WHEEL_RADIUS_M, WHEEL_BASE_M, MIN_RPM_PERCENT, MAX_RPM_PERCENT);
 Odometry odometry(&kinematics, ENCODER_RESOLUTION, REDUCER_RATIO, X4_MODE);
 
-// === PATH FOLLOWING ===
-PurePursuitController purePursuit;
-WaypointManager waypointManager;
+// === SEQUENCE EXECUTOR ===
 SequenceExecutor sequenceExecutor;
 
+// === FUZZY CONTROLLER (TODO) ===
+// FuzzyController fuzzyController;
+
+// === CONTROL MODE ===
 enum ControlMode
 {
-  MODE_MANUAL,   // Manual velocity control
-  MODE_WAYPOINT, // Waypoint-based path following
-  MODE_SEQUENCE  // Sequence-based (MATLAB style)
+  MODE_MANUAL,  // Manual velocity control
+  MODE_SEQUENCE // Sequence-based (F/L/R commands)
 };
 
 ControlMode currentMode = MODE_MANUAL;
 bool pathFollowingActive = false;
-unsigned long lastPPPrintTime = 0;
 
 // === SYSTEM CALLBACK ===
 bool sysUpdateCallback(struct repeating_timer *t)
@@ -129,41 +116,9 @@ bool sysUpdateCallback(struct repeating_timer *t)
   return true;
 }
 
-// === PATH FOLLOWING FUNCTIONS ===
-void startWaypointMode()
-{
-  if (waypointManager.isEmpty())
-  {
-    Serial.println("❌ No waypoints! Create path first (pathstraight, pathlshape, pathsquare)");
-    return;
-  }
-
-  currentMode = MODE_WAYPOINT;
-  pathFollowingActive = true;
-  waypointManager.reset();
-
-  // Setup Pure Pursuit
-  PurePursuitParams params = PurePursuitController::getDefaultParams();
-  params.max_speed = 0.08f;
-  params.lookahead_dist = 0.10f;
-  params.goal_tolerance = 0.02f;
-  params.max_angular_vel = 0.5f;
-  params.speed_reduction_factor = 0.5f;
-  params.enable_fast_math = false;
-  purePursuit.setParams(params);
-
-  // Set first waypoint
-  TargetPoint firstWaypoint = waypointManager.getCurrentWaypoint();
-  Pose2D startPose = odometry.getPose();
-  purePursuit.setTargetWithStartPose(firstWaypoint, startPose);
-
-  Serial.println("\n🚀 Waypoint mode started!");
-  waypointManager.printCurrentWaypoint();
-}
-
+// === SEQUENCE CONTROL ===
 void startSequenceMode()
 {
-  // ✅ KIỂM TRA ĐÚNG: Check có commands không, chứ KHÔNG check isActive()
   if (sequenceExecutor.getTotalCommands() == 0)
   {
     Serial.println("❌ No sequence set! Use 'seq <commands>' first (e.g., seq FFLR)");
@@ -173,22 +128,8 @@ void startSequenceMode()
   currentMode = MODE_SEQUENCE;
   pathFollowingActive = true;
 
-  // Setup Pure Pursuit
-  PurePursuitParams params = PurePursuitController::getDefaultParams();
-  params.max_speed = 0.06f;
-  params.lookahead_dist = 0.04f;
-  params.goal_tolerance = 0.02f;
-  params.enable_fast_math = false;
-  purePursuit.setParams(params);
-
-  Serial.println("\n🚀 Sequence mode started!");
+  Serial.println("\n🚀 Sequence mode started with Fuzzy Controller!");
   sequenceExecutor.printStatus();
-
-  // THÊM DEBUG: In trạng thái ban đầu
-  Serial.print("🔍 Initial state: Active=");
-  Serial.print(sequenceExecutor.isActive() ? "YES" : "NO");
-  Serial.print(" | Complete=");
-  Serial.println(sequenceExecutor.isComplete() ? "YES" : "NO");
 }
 
 void stopPathFollowing()
@@ -196,17 +137,10 @@ void stopPathFollowing()
   pathFollowingActive = false;
   currentMode = MODE_MANUAL;
   differentialDrive.stop();
-  purePursuit.reset();
   Serial.println("⏹ Path following stopped");
-
-  // Serial.print("X: ");
-  // Serial.print(currentPose.x, 3);
-  // Serial.print(" Y: ");
-  // Serial.print(currentPose.y, 3);
-  // Serial.print(" Theta: ");
-  // Serial.println(currentPose.theta * 180.0f / M_PI, 1);
 }
 
+// === PATH FOLLOWING - SIMPLIFIED FOR FUZZY ===
 void updatePathFollowing()
 {
   if (!pathFollowingActive)
@@ -228,80 +162,9 @@ void updatePathFollowing()
     Serial.println("°)");
   }
 
-  if (currentMode == MODE_WAYPOINT)
+  if (currentMode == MODE_SEQUENCE)
   {
-    TargetPoint target = waypointManager.getCurrentWaypoint();
-
-    // Calculate distance
-    float dx = target.x - currentPose.x;
-    float dy = target.y - currentPose.y;
-    float distance = sqrt(dx * dx + dy * dy);
-
-    Serial.print("📏 Dist=");
-    Serial.print(distance, 3);
-    Serial.println("m");
-
-    // Check if straight path
-    bool isStraightPath = (abs(target.y - 0.0f) < 0.001f) &&
-                          (abs(target.theta) < 0.001f);
-
-    if (isStraightPath)
-    {
-      Serial.println("➡️  STRAIGHT mode");
-
-      if (distance < 0.02f)
-      {
-        differentialDrive.stop();
-        Serial.println("✅ GOAL REACHED!");
-
-        if (waypointManager.moveToNextWaypoint())
-        {
-          TargetPoint nextWaypoint = waypointManager.getCurrentWaypoint();
-          purePursuit.setTarget(nextWaypoint);
-          waypointManager.printCurrentWaypoint();
-        }
-        else
-        {
-          Serial.println("\n🎉 All waypoints completed!");
-          stopPathFollowing();
-        }
-      }
-      else
-      {
-        float speed = min(0.08f, distance * 0.5f);
-        speed = max(speed, 0.02f);
-        differentialDrive.setVelocity(speed, 0.0f);
-      }
-    }
-    else
-    {
-      Serial.println("🔄 PURE PURSUIT mode");
-
-      RobotVelocity velocity = purePursuit.update(currentPose);
-      differentialDrive.setVelocity(velocity);
-      purePursuit.printStatus(true, 1);
-
-      if (purePursuit.isGoalReached())
-      {
-        Serial.println("✓ Waypoint reached!");
-        if (waypointManager.moveToNextWaypoint())
-        {
-          TargetPoint nextWaypoint = waypointManager.getCurrentWaypoint();
-          purePursuit.setTarget(nextWaypoint);
-          waypointManager.printCurrentWaypoint();
-        }
-        else
-        {
-          Serial.println("\n🎉 All waypoints completed!");
-          stopPathFollowing();
-        }
-      }
-    }
-  }
-  else if (currentMode == MODE_SEQUENCE)
-  {
-    // ✅ SEQUENCE MODE - DISTANCE-BASED
-
+    // Check completion
     if (sequenceExecutor.isComplete())
     {
       Serial.println("\n🎉 Sequence completed!");
@@ -309,36 +172,42 @@ void updatePathFollowing()
       return;
     }
 
-    // Get current command
+    // Get current command and target
     char currentCmd = sequenceExecutor.getCurrentCommand();
-
-    // ✅ LẤY TARGET CUỐI CÙNG của command hiện tại
     PrimitiveRef finalTarget = sequenceExecutor.getFinalTarget();
 
-    // Tính khoảng cách đến target cuối
+    // Calculate errors
     float dx = finalTarget.x - currentPose.x;
     float dy = finalTarget.y - currentPose.y;
-    float distanceToFinal = sqrt(dx * dx + dy * dy);
+    float distanceError = sqrt(dx * dx + dy * dy);
+    float targetHeading = atan2(dy, dx);
+    float headingError = targetHeading - currentPose.theta;
 
-    // ✅ KIỂM TRA ĐÃ ĐẾN TARGET CHƯA (DISTANCE-BASED)
-    const float GOAL_TOLERANCE = 0.015f; // 1.5cm tolerance
+    // Normalize heading error to [-PI, PI]
+    while (headingError > M_PI)
+      headingError -= 2.0f * M_PI;
+    while (headingError < -M_PI)
+      headingError += 2.0f * M_PI;
 
-    if (distanceToFinal < GOAL_TOLERANCE)
+    // TODO: Replace with Fuzzy Controller
+    // RobotVelocity velocity = fuzzyController.compute(
+    //     distanceError, headingError,
+    //     currentPose.x, currentPose.y, currentPose.theta,
+    //     currentCmd
+    // );
+
+    // TEMPORARY: Simple proportional control
+    const float GOAL_TOLERANCE = 0.03f;
+
+    if (distanceError < GOAL_TOLERANCE)
     {
       differentialDrive.stop();
 
       Serial.print("✓ Command [");
       Serial.print(currentCmd);
-      Serial.print("] completed! Final pose: (");
-      Serial.print(currentPose.x, 3);
-      Serial.print(", ");
-      Serial.print(currentPose.y, 3);
-      Serial.print(", ");
-      Serial.print(currentPose.theta * 180.0f / M_PI, 1);
-      Serial.println("°)");
+      Serial.println("] completed!");
 
-      // ✅ Chuyển sang command tiếp theo
-      delay(200); // Delay nhỏ để ổn định
+      delay(200);
 
       if (!sequenceExecutor.forceNextCommand())
       {
@@ -347,92 +216,34 @@ void updatePathFollowing()
         return;
       }
 
-      // Reset Pure Pursuit cho command mới
-      purePursuit.reset();
-
       return;
     }
 
-    // ═══ CHO CHƯA ĐẾN TARGET - TIẾP TỤC DI CHUYỂN ═══
+    // Simple control until Fuzzy is implemented
+    float linear = min(0.06f, distanceError * 0.8f);
+    linear = max(linear, 0.035f);
 
-    // Get intermediate reference (để có smooth trajectory)
-    PrimitiveRef ref = sequenceExecutor.update();
-    TargetPoint target = {ref.x, ref.y, ref.theta, true};
+    float angular = 0.8f * headingError;
+    angular = constrain(angular, -0.5f, 0.5f);
 
-    bool isStraightCmd = (currentCmd == 'F');
+    differentialDrive.setVelocity(linear, angular);
 
-    if (isStraightCmd)
+    // Debug
+    static unsigned long lastDebug = 0;
+    if (millis() - lastDebug > 500)
     {
-      // ═══ STRAIGHT: Simple Control ═══
-
-      static unsigned long lastDebug = 0;
-      if (millis() - lastDebug > 200)
-      {
-        lastDebug = millis();
-        Serial.print("📏 [F] DistToGoal=");
-        Serial.print(distanceToFinal, 3);
-        Serial.print("m Target=(");
-        Serial.print(finalTarget.x, 3);
-        Serial.print(",");
-        Serial.print(finalTarget.y, 3);
-        Serial.println(")");
-      }
-
-      // Calculate speed (slow down when approaching target)
-      float speed = min(0.06f, distanceToFinal * 0.5f);
-      speed = max(speed, 0.02f);
-
-      differentialDrive.setVelocity(speed, 0.0f);
-
-      Serial.print("🚗 Speed: ");
-      Serial.println(speed, 3);
-    }
-    else
-    {
-      // ═══ TURN (L/R): Pure Pursuit ═══
-
-      Serial.print("🔄 [");
+      lastDebug = millis();
+      Serial.print("📊 [");
       Serial.print(currentCmd);
-      Serial.print("] DistToGoal=");
-      Serial.print(distanceToFinal, 3);
-      Serial.println("m");
-
-      // Use final target for Pure Pursuit
-      TargetPoint ppTarget = {finalTarget.x, finalTarget.y, finalTarget.theta, true};
-
-      static float lastTargetX = -999.0f;
-      static float lastTargetY = -999.0f;
-      if (abs(ppTarget.x - lastTargetX) > 0.01f || abs(ppTarget.y - lastTargetY) > 0.01f)
-      {
-        purePursuit.setTarget(ppTarget);
-        lastTargetX = ppTarget.x;
-        lastTargetY = ppTarget.y;
-      }
-
-      RobotVelocity velocity = purePursuit.update(currentPose);
-      differentialDrive.setVelocity(velocity);
-
-      if (millis() - lastPPPrintTime > 500)
-      {
-        purePursuit.printStatus(true, 1);
-        lastPPPrintTime = millis();
-      }
-    }
-
-    // Print sequence progress
-    static unsigned long lastSeqPrint = 0;
-    if (millis() - lastSeqPrint > 1000)
-    {
-      lastSeqPrint = millis();
-      Serial.print("📊 Seq[");
-      Serial.print(sequenceExecutor.getCurrentCommandIndex());
-      Serial.print("/");
-      Serial.print(sequenceExecutor.getTotalCommands());
-      Serial.print("] Cmd='");
-      Serial.print(currentCmd);
-      Serial.print("' Time=");
-      Serial.print(sequenceExecutor.getElapsedTime(), 1);
-      Serial.println("s");
+      Serial.print("] Dist=");
+      Serial.print(distanceError, 3);
+      Serial.print("m Heading=");
+      Serial.print(headingError * 180.0f / M_PI, 1);
+      Serial.print("° Vel=(");
+      Serial.print(linear, 3);
+      Serial.print(",");
+      Serial.print(angular, 3);
+      Serial.println(")");
     }
   }
 }
@@ -463,11 +274,42 @@ void handleMotionCommands(String command)
       Serial.println("❌ Format: vel <linear> <angular>");
     }
   }
+  else if (command.startsWith("rawmotor "))
+  {
+    // Format: rawmotor <left_pwm> <right_pwm>
+    int spaceIndex = command.indexOf(' ', 9);
+    if (spaceIndex > 0)
+    {
+      float leftPWM = command.substring(9, spaceIndex).toFloat();
+      float rightPWM = command.substring(spaceIndex + 1).toFloat();
+
+      // Bypass PID, direct motor control
+      wheelLeft.enablePID(false);
+      wheelRight.enablePID(false);
+      wheelLeft.setRawMotorSpeed(leftPWM);
+      wheelRight.setRawMotorSpeed(rightPWM);
+
+      Serial.print("Raw motor: L=");
+      Serial.print(leftPWM);
+      Serial.print(" R=");
+      Serial.println(rightPWM);
+    }
+  }
   else if (command == "stop")
   {
     stopPathFollowing();
     differentialDrive.stop();
     Serial.println("✓ All motion stopped");
+  }
+  else if (command == "quickstop") 
+  {
+    wheelLeft.quickStop();
+    wheelRight.quickStop();
+    Serial.println("✓ Quick stop executed");
+  }
+  else
+  {
+    Serial.println("❌ Unknown motion command");
   }
 }
 
@@ -526,116 +368,9 @@ void handlePIDCommands(String command)
     wheelRight.resetPID();
     Serial.println("✓ PID reset");
   }
-}
-
-void handleWaypointCommands(String command)
-{
-  if (command.startsWith("addwp "))
+  else
   {
-    // Parse: addwp <x> <y> [theta_deg]
-    // Example: addwp 0.2 0
-    // Example: addwp 0.3 0.2 90
-
-    int space1 = command.indexOf(' ', 6);
-
-    if (space1 > 0)
-    {
-      float x = command.substring(6, space1).toFloat();
-
-      // Tìm space thứ 2 (nếu có)
-      int space2 = command.indexOf(' ', space1 + 1);
-      float y = 0.0f;
-      float theta_deg = 0.0f;
-
-      if (space2 > 0)
-      {
-        // Format: addwp <x> <y> <theta>
-        y = command.substring(space1 + 1, space2).toFloat();
-        theta_deg = command.substring(space2 + 1).toFloat();
-      }
-      else
-      {
-        // Format: addwp <x> <y> (theta = 0)
-        y = command.substring(space1 + 1).toFloat();
-      }
-
-      float theta_rad = theta_deg * M_PI / 180.0f;
-
-      if (waypointManager.addWaypoint(x, y, theta_rad))
-      {
-        Serial.print("✓ Waypoint [");
-        Serial.print(waypointManager.getWaypointCount() - 1);
-        Serial.print("] added: (");
-        Serial.print(x, 3);
-        Serial.print(", ");
-        Serial.print(y, 3);
-        Serial.print(", ");
-        Serial.print(theta_deg, 1);
-        Serial.print("°) | Total: ");
-        Serial.println(waypointManager.getWaypointCount());
-      }
-      else
-      {
-        Serial.println("❌ Failed to add waypoint!");
-        Serial.print("Reason: Limit reached (max ");
-        Serial.print(MAX_WAYPOINTS);
-        Serial.println(" waypoints)");
-      }
-    }
-    else
-    {
-      Serial.println("❌ Invalid format!");
-      Serial.println("Usage:");
-      Serial.println("  addwp <x> <y>         - Add waypoint at (x,y) with theta=0°");
-      Serial.println("  addwp <x> <y> <theta> - Add waypoint at (x,y) with theta");
-      Serial.println("Examples:");
-      Serial.println("  addwp 0.2 0           - Add waypoint at (0.2m, 0m, 0°)");
-      Serial.println("  addwp 0.3 0.2 90      - Add waypoint at (0.3m, 0.2m, 90°)");
-    }
-  }
-  else if (command.startsWith("pathstraight "))
-  {
-    float distance = command.substring(13).toFloat();
-    waypointManager.createStraightPath(distance);
-  }
-  else if (command.startsWith("pathlshape "))
-  {
-    int spaceIndex = command.indexOf(' ', 11);
-    if (spaceIndex > 0)
-    {
-      float leg1 = command.substring(11, spaceIndex).toFloat();
-      float leg2 = command.substring(spaceIndex + 1).toFloat();
-      waypointManager.createLShapePath(leg1, leg2);
-    }
-    else
-    {
-      Serial.println("❌ Format: pathlshape <leg1> <leg2>");
-    }
-  }
-  else if (command.startsWith("pathsquare "))
-  {
-    float side = command.substring(11).toFloat();
-    waypointManager.createSquarePath(side);
-  }
-  else if (command.startsWith("pathcircle "))
-  {
-    int spaceIndex = command.indexOf(' ', 11);
-    float radius = command.substring(11, spaceIndex > 0 ? spaceIndex : command.length()).toFloat();
-    int segments = spaceIndex > 0 ? command.substring(spaceIndex + 1).toInt() : 8;
-    waypointManager.createCirclePath(radius, segments);
-  }
-  else if (command == "showpath")
-  {
-    waypointManager.printWaypoints();
-  }
-  else if (command == "clearpath")
-  {
-    waypointManager.clear();
-    Serial.println("✓ Path cleared");
-  }
-  else if (command == "follow")
-  {
-    startWaypointMode();
+    Serial.println("❌ Unknown PID command");
   }
 }
 
@@ -646,7 +381,7 @@ void handleSequenceCommands(String command)
     String commands = command.substring(4);
     commands.toUpperCase();
     sequenceExecutor.setCommandString(commands, 3.0f);
-    // sequenceExecutor.start();
+
     Serial.print("✓ Sequence set: \"");
     Serial.print(commands);
     Serial.println("\"");
@@ -665,6 +400,10 @@ void handleSequenceCommands(String command)
   {
     sequenceExecutor.stop();
     stopPathFollowing();
+  }
+  else
+  {
+    Serial.println("❌ Unknown sequence command");
   }
 }
 
@@ -712,6 +451,10 @@ void handleOdometryCommands(String command)
       Serial.println("❌ Format: setpose <x> <y> <theta_degrees>");
     }
   }
+  else
+  {
+    Serial.println("❌ Unknown odometry command");
+  }
 }
 
 void handleStatusCommands(String command)
@@ -728,11 +471,8 @@ void handleStatusCommands(String command)
     case MODE_MANUAL:
       Serial.println("MANUAL");
       break;
-    case MODE_WAYPOINT:
-      Serial.println("WAYPOINT");
-      break;
     case MODE_SEQUENCE:
-      Serial.println("SEQUENCE");
+      Serial.println("SEQUENCE (Fuzzy)");
       break;
     }
 
@@ -764,11 +504,6 @@ void handleStatusCommands(String command)
     Serial.print(pose.theta * 180.0f / M_PI, 1);
     Serial.println("°)");
 
-    if (pathFollowingActive)
-    {
-      Serial.println("\n--- Path Following: ACTIVE ---");
-      purePursuit.printDetailedStatus();
-    }
     Serial.println("════════════════════════════════════════\n");
   }
   else if (command == "on")
@@ -781,48 +516,39 @@ void handleStatusCommands(String command)
     debugMode = false;
     Serial.println("✓ Debug mode disabled");
   }
+  else
+  {
+    Serial.println("❌ Unknown status command");
+  }
 }
 
 void handleHelpCommand(String command)
 {
   Serial.println("\n╔════════════════════════════════════════╗");
-  Serial.println("║   KIDDOCAR CONTROL SYSTEM v2.0         ║");
+  Serial.println("║   KIDDOCAR v3.0 - Fuzzy Controller     ║");
   Serial.println("╚════════════════════════════════════════╝");
 
-  // Auto-generate help from command table
   Serial.println("\n--- AVAILABLE COMMANDS ---");
-
-  const char *lastCategory = "";
   for (int i = 0; COMMAND_TABLE[i].prefix != nullptr; i++)
   {
-    // Group commands by handler (simple categorization)
-    const char *cmd = COMMAND_TABLE[i].prefix;
-    const char *help = COMMAND_TABLE[i].helpText;
-
-    // Print command and help
     Serial.print("  ");
-    Serial.print(cmd);
-
-    // Padding for alignment
-    int len = strlen(cmd);
+    Serial.print(COMMAND_TABLE[i].prefix);
+    int len = strlen(COMMAND_TABLE[i].prefix);
     for (int j = len; j < 16; j++)
       Serial.print(" ");
-
     Serial.print("- ");
-    Serial.println(help);
+    Serial.println(COMMAND_TABLE[i].helpText);
   }
 
   Serial.println("\n--- QUICK EXAMPLES ---");
-  Serial.println("  pathsquare 0.3    - Create 30cm square");
-  Serial.println("  follow            - Start following");
   Serial.println("  seq FFLR          - Set F-F-L-R sequence");
-  Serial.println("  seqstart          - Execute sequence");
-  Serial.println("  vel 0.1 0         - Move forward 0.1 m/s");
+  Serial.println("  seqstart          - Start fuzzy control");
+  Serial.println("  vel 0.1 0         - Manual mode");
   Serial.println("  stop              - Emergency stop");
   Serial.println();
 }
 
-// === MAIN COMMAND PROCESSOR (TABLE-DRIVEN) ===
+// === MAIN COMMAND PROCESSOR ===
 void processCommand(String command)
 {
   command.trim();
@@ -831,7 +557,6 @@ void processCommand(String command)
   if (command.length() == 0)
     return;
 
-  // Search through command table
   for (int i = 0; COMMAND_TABLE[i].prefix != nullptr; i++)
   {
     bool match = COMMAND_TABLE[i].exactMatch
@@ -840,13 +565,11 @@ void processCommand(String command)
 
     if (match)
     {
-      // Found matching command - execute handler
       COMMAND_TABLE[i].handler(command);
       return;
     }
   }
 
-  // No match found
   Serial.println("❌ Unknown command. Type 'help' for available commands.");
 }
 
@@ -857,11 +580,9 @@ void setup()
   delay(2000);
 
   Serial.println("\n╔════════════════════════════════════════╗");
-  Serial.println("║   KIDDOCAR CONTROL SYSTEM v2.0         ║");
-  Serial.println("║   with Pure Pursuit Integration        ║");
+  Serial.println("║   KIDDOCAR v3.0 - Fuzzy Controller     ║");
   Serial.println("╚════════════════════════════════════════╝");
 
-  // Initialize wheels
   if (!wheelLeft.begin() || !wheelRight.begin())
   {
     Serial.println("❌ Failed to initialize wheels!");
@@ -870,12 +591,10 @@ void setup()
   }
   Serial.println("✓ Wheels initialized");
 
-  // Setup filters
-  wheelLeft.setRPMFilter(FilterFactory::createKalman(0.03f, 4.0f));
-  wheelRight.setRPMFilter(FilterFactory::createKalman(0.03f, 4.0f));
+  wheelLeft.setRPMFilter(FilterFactory::createKalman(0.1f, 10.0f));
+  wheelRight.setRPMFilter(FilterFactory::createKalman(0.1f, 10.0f));
   Serial.println("✓ Filters configured");
 
-  // Setup PID
   wheelLeft.setPIDTunings(KP, KI, KD);
   wheelRight.setPIDTunings(KP, KI, KD);
   wheelLeft.enablePID(true);
@@ -884,14 +603,12 @@ void setup()
   wheelRight.setPIDLimits(-100.0, 100.0);
   Serial.println("✓ PID configured");
 
-  // Setup acceleration
   wheelLeft.setMaxAcceleration(40.0f);
   wheelRight.setMaxAcceleration(40.0f);
   wheelLeft.enableAccelerationLimiting(true);
   wheelRight.enableAccelerationLimiting(true);
   Serial.println("✓ Acceleration limiting enabled");
 
-  // Setup timer
   static struct repeating_timer timer;
   if (!add_repeating_timer_ms(SAMPLE_TIME_MS, sysUpdateCallback, NULL, &timer))
   {
@@ -901,7 +618,7 @@ void setup()
   }
   Serial.println("✓ Timer initialized");
 
-  Serial.println("\n✓ System ready!");
+  Serial.println("\n✓ System ready! (Fuzzy Controller - TODO)");
   Serial.println("Type 'help' for commands\n");
 }
 
@@ -916,12 +633,10 @@ void loop()
   {
     char inChar = (char)Serial.read();
 
-    // Check buffer overflow
     if (bufferIndex >= sizeof(inputBuffer) - 1)
     {
-      Serial.println("❌ Input too long, command ignored");
+      Serial.println("❌ Input too long");
       bufferIndex = 0;
-      // Clear remaining input
       while (Serial.available())
         Serial.read();
       continue;
@@ -938,7 +653,6 @@ void loop()
     }
   }
 
-  // Process command
   if (commandReady)
   {
     processCommand(inputString);
@@ -946,7 +660,6 @@ void loop()
     commandReady = false;
   }
 
-  // Update system
   if (dataReady)
   {
     long encoderLeft = wheelLeft.getPulsePosition();
@@ -954,10 +667,8 @@ void loop()
     odometry.update(encoderLeft, encoderRight);
     differentialDrive.update();
 
-    // Update path following
     updatePathFollowing();
 
-    // Debug output
     if (debugMode && !pathFollowingActive)
     {
       odometry.printStatus(true, 10);
