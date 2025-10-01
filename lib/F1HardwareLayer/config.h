@@ -57,4 +57,10 @@
 // Linear velocity limits
 #define LINEAR_VEL_MIN 0.02f  // m/s
 #define LINEAR_VEL_MAX 0.06f  // m/s
+// Angular velocity limits
+#define ANGULAR_VEL_MIN 0.21f  // rad/s
+#define ANGULAR_VEL_MAX 0.9f   // rad/s
+
+#define LINEAR_VEL_DEADZONE 0.015f  // m/s
+#define ANGULAR_VEL_DEADZONE 0.15f    // rad/s   
 #endif

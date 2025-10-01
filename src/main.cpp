@@ -84,7 +84,7 @@ float currentKD = KD;
 
 // === APPLICATION LAYER ===
 Kinematics kinematics(WHEEL_RADIUS_M, WHEEL_BASE_M);
-DifferentialDrive differentialDrive(&wheelLeft, &wheelRight, WHEEL_RADIUS_M, WHEEL_BASE_M, MIN_RPM_PERCENT, MAX_RPM_PERCENT);
+DifferentialDrive differentialDrive(&wheelLeft, &wheelRight, WHEEL_RADIUS_M, WHEEL_BASE_M, MIN_RPM_PERCENT, MAX_RPM_PERCENT, LINEAR_VEL_DEADZONE, ANGULAR_VEL_DEADZONE);
 Odometry odometry(&kinematics, ENCODER_RESOLUTION, REDUCER_RATIO, X4_MODE);
 
 // === SEQUENCE EXECUTOR ===

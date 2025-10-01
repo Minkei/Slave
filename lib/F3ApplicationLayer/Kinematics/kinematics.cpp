@@ -59,9 +59,16 @@ WheelRPM Kinematics::constrainRPM(const WheelRPM &wheel_rpm, float min_rpm, floa
     constrained.left  = std::clamp(wheel_rpm.left,  -max_rpm, max_rpm);
     constrained.right = std::clamp(wheel_rpm.right, -max_rpm, max_rpm);
 
-    // Deadzone: nếu nhỏ hơn min thì coi như 0
-    if (std::abs(constrained.left) < min_rpm) constrained.left = 0.0f;
-    if (std::abs(constrained.right) < min_rpm) constrained.right = 0.0f;
+    // ✅ NEW LOGIC: Chỉ apply min constraint nếu CẢ HAI bánh cùng chiều (linear motion)
+    // Nếu 2 bánh ngược chiều (rotation), cho phép RPM nhỏ
+    bool isRotation = (constrained.left * constrained.right) < 0; // Dấu ngược nhau
+    
+    if (!isRotation) {
+        // Linear motion: apply min RPM deadzone
+        if (std::abs(constrained.left) < min_rpm) constrained.left = 0.0f;
+        if (std::abs(constrained.right) < min_rpm) constrained.right = 0.0f;
+    }
+    // else: Rotation motion - allow small RPM values
 
     return constrained;
 }

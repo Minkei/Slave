@@ -205,6 +205,14 @@ void Wheel::setTargetRPM(float rpm)
     // ✅ BẮT ĐẦU TỪ RPM THỰC TẾ thay vì giá trị cũ
     float actualRPM = getCurrentRPM();
 
+    // ✅ IN RA ĐỂ DEBUG
+    Serial.print("🔍 DEBUG setTargetRPM: actualRPM=");
+    Serial.print(actualRPM);
+    Serial.print(", _rpmCalcCache.currentRPMFiltered=");
+    Serial.print(_rpmCalcCache.currentRPMFiltered);
+    Serial.print(", _rpmCalcCache.currentRPM=");
+    Serial.println(_rpmCalcCache.currentRPM);
+
     // Nếu bánh xe đã dừng hẳn (< 2 RPM), reset về 0
     if (abs(actualRPM) < 2.0f)
     {
@@ -249,12 +257,21 @@ void Wheel::stop()
 
     // Clear ALL targets (including acceleration state)
     _targetRPM = 0.0f;
-    _currentTargetRPM = 0.0f; // ✅ Reset acceleration state
-    _finalTargetRPM = 0.0f;   // ✅ Reset acceleration state
+    _currentTargetRPM = 0.0f;
+    _finalTargetRPM = 0.0f;
 
     // Update state
     _direction = STOP;
+
+    // ✅ CRITICAL: Reset TẤT CẢ RPM cache
     _rpmCalcCache.currentRPM = 0.0f;
+    _rpmCalcCache.currentRPMFiltered = 0.0f; // ← THÊM DÒNG NÀY!
+
+    // ✅ BONUS: Reset filter nếu có
+    if (_rpmFilter)
+    {
+        _rpmFilter->reset();
+    }
 }
 
 void Wheel::setRawMotorSpeed(float speed)
