@@ -58,6 +58,8 @@ void DifferentialDrive::turnRight(float angular_speed)
 void DifferentialDrive::stop()
 {
     setVelocity(0.0f, 0.0f);
+    _wheel_left->stop();
+    _wheel_right->stop();
 }
 
 void DifferentialDrive::update()

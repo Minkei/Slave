@@ -53,4 +53,8 @@
 #define RPM_CALC_INTERVAL 10.0       // RPM calculation interval in ms
 #define DEFAULT_UPDATE_INTERVAL 10.0 // Default update interval in ms
 
+
+// Linear velocity limits
+#define LINEAR_VEL_MIN 0.02f  // m/s
+#define LINEAR_VEL_MAX 0.06f  // m/s
 #endif

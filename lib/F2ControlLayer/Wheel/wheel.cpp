@@ -246,14 +246,6 @@ void Wheel::stop()
     _rpmCalcCache.currentRPM = 0.0f;
 }
 
-void Wheel::quickStop()
-{
-    if (_motor)
-    {
-        _motor->quickStop();
-    }
-}
-
 void Wheel::setRawMotorSpeed(float speed)
 {
     if (_motor)

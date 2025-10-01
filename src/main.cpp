@@ -42,7 +42,6 @@ const CommandEntry COMMAND_TABLE[] = {
     // Motion commands
     {"vel ", handleMotionCommands, false, "Set velocity <lin> <ang> (m/s, rad/s)"},
     {"stop", handleMotionCommands, true, "Emergency stop all motion"},
-    {"quickstop", handleMotionCommands, true, "Quick stop all motion"},
     {"rawmotor ", handleMotionCommands, false, "Set raw motor speed <left> <right> (-100 to 100)"},
 
     // PID commands
@@ -298,14 +297,7 @@ void handleMotionCommands(String command)
   else if (command == "stop")
   {
     stopPathFollowing();
-    differentialDrive.stop();
     Serial.println("✓ All motion stopped");
-  }
-  else if (command == "quickstop") 
-  {
-    wheelLeft.quickStop();
-    wheelRight.quickStop();
-    Serial.println("✓ Quick stop executed");
   }
   else
   {
@@ -671,7 +663,7 @@ void loop()
 
     if (debugMode && !pathFollowingActive)
     {
-      odometry.printStatus(true, 10);
+      differentialDrive.printStatus(true, 10);
     }
 
     dataReady = false;

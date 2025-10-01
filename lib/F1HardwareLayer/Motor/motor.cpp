@@ -45,15 +45,9 @@ void Motor::run(float speed) {
 
 // Dừng motor
 void Motor::stop() {
+    analogWrite(_pinPWM, 0);
+    delayMicroseconds(100); // Small delay to ensure PWM is set to 0
     digitalWrite(_pinDir1, LOW);
     digitalWrite(_pinDir2, LOW);
-    analogWrite(_pinPWM, 0);
 }
 
-void Motor::quickStop()
-{
-    // Immediately cut power to motor
-    digitalWrite(_pinDir1, LOW);
-    digitalWrite(_pinDir2, LOW);
-    analogWrite(_pinPWM, 0);
-}
