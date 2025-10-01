@@ -45,7 +45,7 @@ Wheel::Wheel(uint8_t pinDir1, uint8_t pinDir2, uint8_t pinPWM, uint16_t pwmFreq,
     _targetRPM = 0.0f;
 
     // Current state
-    _currentRPM = 0.0f;
+    _rpmCalcCache.currentRPM = 0.0f;
     _direction = STOP;
 
     // Timing
@@ -55,8 +55,8 @@ Wheel::Wheel(uint8_t pinDir1, uint8_t pinDir2, uint8_t pinPWM, uint16_t pwmFreq,
     _pidUpdateInterval = 10;  // Default 10ms
 
     // RPM calculation
-    _lastPulseCount = 0;
-    _lastPulseTime = 0;
+    _rpmCalcCache.lastPulseCount = 0;
+    _rpmCalcCache.lastPulseTime = 0;
     _totalPulsesPerRev = (float)_encoder_resolution * _reducer_ratio * _mode;
     _rpmConversionFactor = 60000.0f / _totalPulsesPerRev;
     _wheelCircumference = PI * _wheelDiameter;
@@ -122,10 +122,10 @@ bool Wheel::begin() {
 
     _lastUpdateTime = millis();
     _lastRPMCalcTime = millis();
-    _lastPulseTime = millis();
+    _rpmCalcCache.lastPulseTime = millis();
 
     if (_encoder) {
-        _lastPulseCount = _encoder->getPulsePosition();
+        _rpmCalcCache.lastPulseCount = _encoder->getPulsePosition();
     }
     
     return success;
@@ -173,11 +173,11 @@ void Wheel::setTargetRPM(float rpm) {
     _pidEnabled = true;
     _lastAccelUpdate = millis();
     
-    Serial.print("Target RPM set to ");
-    Serial.print(_finalTargetRPM);
-    Serial.print(" (will ramp from ");
-    Serial.print(_currentTargetRPM);
-    Serial.println(")");
+    // Serial.print("Target RPM set to ");
+    // Serial.print(_finalTargetRPM);
+    // Serial.print(" (will ramp from ");
+    // Serial.print(_currentTargetRPM);
+    // Serial.println(")");
 }
 
 void Wheel::stop()
@@ -200,7 +200,7 @@ void Wheel::stop()
     
     // Update state
     _direction = STOP;
-    _currentRPM = 0.0f;
+    _rpmCalcCache.currentRPM = 0.0f;
 }
 
 void Wheel::setRawMotorSpeed(float speed)
@@ -337,32 +337,33 @@ float Wheel::getCurrentRPM() const
 {
     if (!_encoder) return 0.0f;
     
-    _tempCurrentTime = millis();
+    _rpmCalcCache.currentPulses = millis();
+    
     noInterrupts();
-    _tempCurrentPulses = _encoder->getPulsePosition();
+    _rpmCalcCache.currentPulses = _encoder->getPulsePosition();
     interrupts();
 
-    _tempDeltaTime = _tempCurrentTime - _lastPulseTime;
+    _rpmCalcCache.deltaTime = _rpmCalcCache.currentPulses - _rpmCalcCache.lastPulseTime;
 
-    if (_tempDeltaTime < 10) return _currentRPM; // Avoid too frequent calculations
+    if (_rpmCalcCache.deltaTime < 10) return _rpmCalcCache.currentRPM; // Avoid too frequent calculations
 
-    _tempDeltaPulses = _tempCurrentPulses - _lastPulseCount;
+    _rpmCalcCache.deltaPulses = _rpmCalcCache.currentPulses - _rpmCalcCache.lastPulseCount;
 
-    _currentRPM = (_tempDeltaPulses * _rpmConversionFactor) / _tempDeltaTime;
+    _rpmCalcCache.currentRPM = (_rpmCalcCache.deltaPulses * _rpmConversionFactor) / _rpmCalcCache.deltaTime;
     
-    if (_reversed) _currentRPM = -_currentRPM;
+    if (_reversed) _rpmCalcCache.currentRPM = -_rpmCalcCache.currentRPM;
 
-    _lastPulseTime = _tempCurrentTime;
-    _lastPulseCount = _tempCurrentPulses;
+    _rpmCalcCache.lastPulseTime = _rpmCalcCache.currentPulses;
+    _rpmCalcCache.lastPulseCount = _rpmCalcCache.currentPulses;
     
     
 
     if (_rpmFilter) {
-        _currentRPMFiltered = _rpmFilter->update(_currentRPM);
-        return _currentRPMFiltered;
+        _rpmCalcCache.currentRPMFiltered = _rpmFilter->update(_rpmCalcCache.currentRPM);
+        return _rpmCalcCache.currentRPMFiltered;
     }
 
-    return _currentRPM;
+    return _rpmCalcCache.currentRPM;
 }
 
 float Wheel::getTargetRPM() const
@@ -400,7 +401,7 @@ void Wheel::printStatus(bool active, uint8_t print_interval) const
         Serial.print(_targetRPM);
         Serial.print(",");
         Serial.print("C:");
-        Serial.print(_currentRPMFiltered);
+        Serial.print(_rpmCalcCache.currentRPMFiltered);
         Serial.println();
         _printCounter = 0;
     }

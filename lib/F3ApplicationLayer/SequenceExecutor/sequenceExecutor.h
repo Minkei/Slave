@@ -33,7 +33,7 @@ private:
     void updateCumulativePosition(char cmd);
     
     // Transform local to global coordinates
-    PrimitiveRef transformToGlobal(const PrimitiveRef& local);
+    PrimitiveRef transformToGlobal(const PrimitiveRef& local) const;
     
 public:
     SequenceExecutor();
@@ -46,6 +46,10 @@ public:
     
     // Main update function
     PrimitiveRef update();
+
+    bool forceNextCommand();
+
+    PrimitiveRef getFinalTarget() const;
     
     // Status queries
     bool isActive() const { return _active; }
