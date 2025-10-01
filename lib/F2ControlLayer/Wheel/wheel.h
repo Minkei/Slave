@@ -48,7 +48,7 @@ public:
     // Basic control
     void setTargetRPM(float rpm);
     void stop();
-    void quickStop();
+    
     void setRawMotorSpeed(float speed);
 
     // PID Configuration
